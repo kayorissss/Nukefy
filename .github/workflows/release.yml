@@ -27,17 +27,22 @@ jobs:
         run: npm test
 
       - name: Build Windows artifacts
-        shell: pwsh
+        shell: bash
         run: |
-          npx electron-builder --win --publish never *>&1 | Tee-Object -FilePath build.log
-          exit $LASTEXITCODE
+          set -x
+          node -v
+          npx electron-builder --version
+          ls node_modules/electron | head -5
+          ls node_modules/electron/dist 2>/dev/null | head -5
+          npx electron-builder --win --publish never 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
 
       - name: Report build log on failure
         if: failure()
         shell: bash
         run: |
           tail -n 150 build.log > ci-build-log.txt 2>/dev/null || echo "build.log отсутствует" > ci-build-log.txt
-          node -e "const fs=require('fs');fs.writeFileSync('payload.json',JSON.stringify({body:'ELECTRON-BUILDER LOG:\n```\n'+fs.readFileSync('ci-build-log.txt','utf8')+'\n```\n'}))"
+          node report-log.js
           curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" --data @payload.json || true
           git add ci-build-log.txt || true
