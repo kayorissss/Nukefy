@@ -56,6 +56,14 @@ async function until(fn, ms, label) {
   if (!/опасн/i.test(know)) throw new Error('в карточке нет описания опасности');
   console.log('  ok  карточка угрозы со справкой (что делает / чем опасен / даты)');
 
+  // плавающая справка «?» не обрезается и грузится
+  const q = doc.querySelector('#threatList .help-q');
+  q.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
+  await until(() => doc.getElementById('kpop') && !doc.getElementById('kpop').hidden && /опас/i.test(doc.getElementById('kpop').textContent), 4000, 'справка «?» открылась');
+  q.dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true }));
+  await until(() => doc.getElementById('kpop').hidden, 2000, 'справка «?» закрылась');
+  console.log('  ok  справка «?» — плавающая карточка, грузится и закрывается');
+
   // действия: карантин
   const qBtn = doc.querySelector('#threatDetail [data-act="quarantine"]');
   qBtn.click();

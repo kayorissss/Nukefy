@@ -11,4 +11,9 @@ const CATS = {
 
 const SEV_LABEL = { 1: 'низкая', 2: 'средняя', 3: 'высокая', 4: 'критическая' };
 
-module.exports = { MINER_PORTS, CATS, SEV_LABEL };
+/* Доверенные пользовательские community-инструменты (zapret, GoodbyeDPI):
+   пользователь ставит их осознанно — эвристики автозапуска/Temp по ним молчат. */
+const TRUSTED_PATH_RE = [/zapret/i, /goodbyedpi/i];
+const isTrustedPath = (p) => TRUSTED_PATH_RE.some((re) => re.test(String(p || '')));
+
+module.exports = { MINER_PORTS, CATS, SEV_LABEL, TRUSTED_PATH_RE, isTrustedPath };

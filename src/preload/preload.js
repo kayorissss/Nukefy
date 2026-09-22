@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('nukefy', {
   systemCheck: invoke('system:check'),
   threats: invoke('threat:list'),
   act: invoke('threat:act'),
-  knowledge: invoke('threat:knowledge'),
+  knowledge: (id, fam) => ipcRenderer.invoke('threat:knowledge', id, fam),
   quarantineList: invoke('quarantine:list'),
   quarantineRestore: invoke('quarantine:restore'),
   quarantineRemove: invoke('quarantine:remove'),

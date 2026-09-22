@@ -220,9 +220,7 @@ function listItem(t, compact) {
 }
 function statusRu(s) { return { healed: 'вылечено', quarantined: 'в карантине', deleted: 'удалено', ignored: 'игнорируется', whitelisted: 'в исключениях', dismissed: 'обработано' }[s] || s; }
 function helpQ(t) {
-  const k = KNOWLEDGE_CACHE[t.id];
-  const body = k ? popBody(k) : '<p>Нажмите, чтобы загрузить справку…</p>';
-  return `<span class="help-q" data-id="${esc(t.id)}" tabindex="0">?<span class="pop">${body}</span></span>`;
+  return `<span class="help-q" data-id="${esc(t.id)}" data-fam="${esc(t.fam || 'generic')}" tabindex="0">?</span>`;
 }
 const KNOWLEDGE_CACHE = {};
 function popBody(k) {
@@ -240,15 +238,37 @@ async function loadKnowledge(t) {
   if (k) KNOWLEDGE_CACHE[t.id] = k;
   return k;
 }
+/* плавающая карточка справки «?» — не режется overflow-контейнерами */
+const kpop = document.createElement('div');
+kpop.id = 'kpop'; kpop.className = 'kpop'; kpop.hidden = true;
+document.body.appendChild(kpop);
+let kpopFor = null;
+function placeKpop(q) {
+  const r = q.getBoundingClientRect();
+  kpop.hidden = false;
+  const w = 348, h = kpop.offsetHeight || 260;
+  let left = r.right + 12;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 12);
+  let top = Math.min(Math.max(8, r.top - 12), window.innerHeight - h - 8);
+  kpop.style.left = left + 'px';
+  kpop.style.top = top + 'px';
+}
 document.addEventListener('mouseover', async (e) => {
   const q = e.target.closest && e.target.closest('.help-q');
-  if (!q || q.dataset.loaded) return;
-  q.dataset.loaded = '1';
-  const t = (STATE.threats || []).find((x) => x.id === q.dataset.id);
-  if (!t) return;
-  const k = await loadKnowledge(t);
-  const pop = q.querySelector('.pop');
-  if (pop && k) pop.innerHTML = popBody(k);
+  if (!q || q === kpopFor) return;
+  kpopFor = q;
+  kpop.innerHTML = '<p class="kpop-load">Загрузка справки…</p>';
+  placeKpop(q);
+  const t = findT(q.dataset.id) || scanUi.results.find((x) => x.id === q.dataset.id);
+  let k = t ? await loadKnowledge(t) : null;
+  if (!k) k = await api.knowledge(q.dataset.id, q.dataset.fam);
+  if (kpopFor !== q) return;
+  kpop.innerHTML = popBody(k);
+  placeKpop(q);
+});
+document.addEventListener('mouseout', (e) => {
+  const q = e.target.closest && e.target.closest('.help-q');
+  if (q && !(e.relatedTarget && q.contains(e.relatedTarget))) { kpop.hidden = true; kpopFor = null; }
 });
 
 function bindThreats() {
@@ -447,12 +467,31 @@ function fillSettings() {
 }
 
 /* ---------------- события движка ---------------- */
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+function scanTicker() {
+  if (scanUi.tick) return;
+  scanUi.tick = setInterval(() => {
+    if (!scanUi.active || !scanUi.last) return;
+    const el = (Date.now() - scanUi.startedAt) / 1000;
+    const { done, total, threats } = scanUi.last;
+    const speed = el > 0.5 ? done / el : 0;
+    const eta = speed > 1 ? (total - done) / speed : 0;
+    $('#scanStats').textContent = `файлов: ${done.toLocaleString('ru-RU')} из ${total.toLocaleString('ru-RU')} · угроз: ${threats || 0} · ${Math.round(speed).toLocaleString('ru-RU')} ф/с · прошло ${fmtDur(el)} · осталось ~${fmtDur(eta)}`;
+  }, 500);
+}
 function bindEvents() {
   api.onEvent(async (e) => {
     if (e.type === 'scan:start') {
       scanUi.active = true;
+      scanUi.startedAt = Date.now();
+      scanUi.last = null;
       $('#radar').classList.add('scanning');
       $('#btnScanStart').disabled = true; $('#btnScanCancel').disabled = false;
+      scanTicker();
     }
     if (e.type === 'phase') {
       $('#scanPhase').textContent = e.message || '';
@@ -460,7 +499,12 @@ function bindEvents() {
     if (e.type === 'progress') {
       const pct = e.total ? Math.round((e.done / e.total) * 100) : 0;
       $('#scanPct').textContent = pct + '%';
-      $('#scanStats').textContent = `файлов: ${(e.files || 0).toLocaleString('ru-RU')} из ${(e.total || 0).toLocaleString('ru-RU')} · угроз: ${e.threats || 0}`;
+      scanUi.last = { done: e.done || 0, total: e.total || 0, threats: e.threats || 0 };
+      if (e.path) {
+        const pEl = $('#scanPath');
+        pEl.textContent = e.path.length > 96 ? '…' + e.path.slice(-95) : e.path;
+        pEl.title = e.path;
+      }
     }
     if (e.type === 'threat') {
       scanUi.results.unshift(e.threat);
@@ -469,6 +513,7 @@ function bindEvents() {
     }
     if (e.type === 'scan:finished') {
       scanUi.active = false;
+      if (scanUi.tick) { clearInterval(scanUi.tick); scanUi.tick = null; }
       $('#radar').classList.remove('scanning');
       $('#btnScanStart').disabled = false; $('#btnScanCancel').disabled = true;
       $('#scanPct').textContent = '100%';

@@ -64,6 +64,14 @@ class ThreatStore {
     this.save();
     return t;
   }
+  /** Удалить записи, удовлетворяющие предикату (миграции между версиями). */
+  purge(pred) {
+    const before = this.threats.length;
+    this.threats = this.threats.filter((t) => !pred(t));
+    const removed = before - this.threats.length;
+    if (removed) this.save();
+    return removed;
+  }
   addHistory(rec) {
     this.history.unshift(rec);
     if (this.history.length > 60) this.history.length = 60;

@@ -7,18 +7,34 @@
 const fs = require('fs');
 const path = require('path');
 const { execCapture, IS_WIN } = require('./util');
-const { MINER_PORTS } = require('./constants');
+const { MINER_PORTS, isTrustedPath } = require('./constants');
 
 const SYSTEM_NAMES = ['system', 'system idle process', 'registry', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'winlogon.exe', 'dwm.exe', 'explorer.exe', 'spoolsv.exe', 'searchindexer.exe', 'system interrupts', 'memory compression', 'secure system', 'fontdrvhost.exe', 'taskhostw.exe', 'runtimebroker.exe', 'sihost.exe', 'ctfmon.exe', 'conhost.exe', 'dllhost.exe', 'wudfhost.exe', 'searchapp.exe', 'startmenuexperiencehost.exe', 'textinputhost.exe', 'applicationframehost.exe', 'shellexperiencehost.exe', 'backgroundtaskhost.exe', 'compattelrunner.exe', 'msmpeng.exe', 'nissrv.exe', 'securityhealthservice.exe', 'smartscreen.exe', 'consent.exe', 'taskmgr.exe'];
 
+/* Где legitimately живут системные процессы Windows */
+const SYS_HOME = {
+  'svchost.exe': ['\\windows\\system32\\', '\\windows\\syswow64\\'],
+  'csrss.exe': ['\\windows\\system32\\'],
+  'lsass.exe': ['\\windows\\system32\\'],
+  'winlogon.exe': ['\\windows\\system32\\'],
+  'wininit.exe': ['\\windows\\system32\\'],
+  'services.exe': ['\\windows\\system32\\'],
+  'smss.exe': ['\\windows\\system32\\'],
+  'dwm.exe': ['\\windows\\system32\\'],
+  'conhost.exe': ['\\windows\\system32\\'],
+  'explorer.exe': ['\\windows\\', '\\windows\\system32\\'], // explorer лежит в корне Windows
+  'taskhostw.exe': ['\\windows\\system32\\'],
+  'runtimebroker.exe': ['\\windows\\system32\\', '\\windows\\immersive control panel\\'],
+};
 function masquerade(name, exePath) {
   const n = String(name || '').toLowerCase();
   const p = String(exePath || '').toLowerCase();
-  const sysLike = ['svchost.exe', 'csrss.exe', 'lsass.exe', 'winlogon.exe', 'services.exe', 'smss.exe', 'explorer.exe', 'dwm.exe'];
-  if (!sysLike.includes(n)) return null;
-  const sysDirOk = /(\\windows\\(system32|syswow64)\\|\/(sbin|bin|usr\/bin)\/)/.test(p) || !p;
-  if (sysDirOk) return null;
-  return `Процесс с именем системного «${n}» запущен из ${p || 'неизвестного пути'}`;
+  const homes = SYS_HOME[n];
+  if (!homes) return null;
+  if (!p) return null; // путь недоступен (системный процесс без прав) — не считаем маскарадом
+  if (homes.some((h) => p.includes(h))) return null;
+  if (/\/(sbin|bin|usr\/bin|usr\/sbin)\//.test(p)) return null; // linux
+  return `Процесс с именем системного «${n}» запущен из ${exePath}`;
 }
 
 async function listProcesses() {
@@ -102,18 +118,45 @@ async function listConnections() {
   return conns;
 }
 
+
+/* Свои собственные пути (Nukefy, в т.ч. portable из Temp) — не детектим себя */
+function isSelf(p, selfPaths) {
+  if (!p) return false;
+  const lp = String(p).toLowerCase();
+  return (selfPaths || []).some((s) => s && lp.startsWith(String(s).toLowerCase()));
+}
+
+
+/** PowerShell-дропер: скрытое окно + загрузка из сети в одной командной строке. */
+function psDropper(cmd) {
+  const c = String(cmd || '').toLowerCase();
+  if (!/(powershell|pwsh)/.test(c)) return false;
+  const hidden = /(-w\s+hidden|-windowstyle\s+hidden|-noninteractive[^|]*-enc\s|encodedcommand)/.test(c);
+  const fetch = /(https?:\/\/|iwr\s|invoke-webrequest|invoke-restmethod|downloadstring|downloadfile|net\.webclient|start-bits)/.test(c);
+  return hidden && fetch && c.length > 40;
+}
+
 /** Сопоставить процессы+соединения+сигнатуры → угрозы. */
-function analyzeProcesses(procs, conns, db) {
+function analyzeProcesses(procs, conns, db, opts = {}) {
   const threats = [];
-  const byPid = new Map(procs.map((p) => [p.pid, p]));
+  const selfPaths = opts.selfPaths || [];
   for (const p of procs) {
     const lowName = String(p.name || '').toLowerCase();
-    const mask = masquerade(p.name, p.path);
-    const sigHits = db.matchText(`${p.name} ${p.cmd}`, null).filter((s) => ['miner', 'trojan', 'virus'].includes(s.cat));
-    const tempRun = p.path && /\\(temp|tmp)\\|\\appdata\\local\\temp|\/tmp\/|\/var\/tmp\//.test(String(p.path).toLowerCase());
+    const self = isSelf(p.path, selfPaths) || isSelf(p.cmd, selfPaths);
+    const trusted = isTrustedPath(p.path) || isTrustedPath(p.cmd);
     const minerConn = conns.filter((c) => c.pid === p.pid && MINER_PORTS.includes(c.remotePort));
+    // сигнатуры с корректной логикой; в контексте процессов не используем файловые эвристики-сигнатуры
+    const sigHits = self ? [] : db.matchTextSmart(`${p.name} ${p.cmd}`, {
+      cats: ['miner', 'trojan', 'virus'],
+      excludeFams: ['script-dropper', 'webshell', 'packed', 'ransomware', 'remote-admin'],
+    });
+    const mask = (!self && !trusted) ? masquerade(p.name, p.path) : null;
+    const tempRun = (!self && !trusted) && p.path && /\\(temp|tmp)\\|\\appdata\\local\\temp|\/tmp\/|\/var\/tmp\//.test(String(p.path).toLowerCase());
+    const dropper = !self && psDropper(p.cmd);
     if (sigHits.length) {
       threats.push({ pid: p.pid, name: p.name, path: p.path, cmd: p.cmd, fam: sigHits[0].fam, cat: sigHits[0].cat, sev: sigHits[0].sev, title: sigHits[0].id, desc: 'Процесс: ' + sigHits[0].desc, reason: 'sig' });
+    } else if (dropper) {
+      threats.push({ pid: p.pid, name: p.name, path: p.path, cmd: p.cmd, fam: 'script-dropper', cat: 'trojan', sev: 3, title: 'Proc.ScriptDropper', desc: 'Командная строка: скрытое выполнение + загрузка полезной нагрузки из сети', reason: 'dropper' });
     } else if (mask) {
       threats.push({ pid: p.pid, name: p.name, path: p.path, cmd: p.cmd, fam: 'temp-exec', cat: 'trojan', sev: 4, title: 'Proc.Masquerade', desc: mask, reason: 'masquerade' });
     } else if (minerConn.length) {

@@ -126,6 +126,27 @@ class SignatureDB {
     }
     return found;
   }
+  /** Logic-aware сопоставление для текста (командные строки процессов):
+      учитывает logic any/all и список допустимых категорий. */
+  matchTextSmart(text, opts = {}) {
+    const t = String(text || '').toLowerCase();
+    const cats = opts.cats || null;
+    const excludeFams = opts.excludeFams || [];
+    const found = [];
+    for (const sig of this.signatures) {
+      if (cats && !cats.includes(sig.cat)) continue;
+      if (excludeFams.includes(sig.fam)) continue;
+      let hit = sig.logic === 'all';
+      for (const pat of sig.patterns) {
+        if (pat.type !== 'ascii') continue;
+        const ok = t.includes(pat.needle.toString('latin1'));
+        if (sig.logic === 'any' && ok) { hit = true; break; }
+        if (sig.logic === 'all' && !ok) { hit = false; break; }
+      }
+      if (hit) found.push(sig);
+    }
+    return found;
+  }
 }
 
 function hexFind(buf, bytes, mask) {

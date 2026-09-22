@@ -34,7 +34,7 @@ class Protection {
       const found = [];
       if (settings.get().checks.processes !== false) {
         const [procs, conns] = await Promise.all([listProcesses(), listConnections()]);
-        found.push(...analyzeProcesses(procs, conns, db).map((t) => ({ ...t, source: t.reason === 'pool-port' ? 'network' : 'process' })));
+        found.push(...analyzeProcesses(procs, conns, db, { selfPaths: this.deps.selfPaths || [] }).map((t) => ({ ...t, source: t.reason === 'pool-port' ? 'network' : 'process' })));
       }
       if (settings.get().checks.persistence !== false) {
         const items = await collectAutorun();

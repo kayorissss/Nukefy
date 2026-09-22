@@ -35,6 +35,7 @@ class FileScanner {
     this.mode = opts.mode || 'full';
     this.roots = opts.roots || [];
     this.singleFile = opts.singleFile || null;
+    this.excludePrefixes = (opts.excludePrefixes || []).map((x) => String(x).toLowerCase());
     this._seenHash = new Set();
   }
   cancel() { this.cancelled = true; }
@@ -59,6 +60,9 @@ class FileScanner {
         this.onEvent({ type: 'phase', phase: 'collect', message: `Каталог: ${root} (+${found.length})` });
       }
     }
+    if (this.excludePrefixes.length) {
+      files = files.filter((f) => !this.excludePrefixes.some((pr) => f.toLowerCase().startsWith(pr)));
+    }
     const total = files.length;
     this.onEvent({ type: 'phase', phase: 'scan', total, message: 'Сканирование…' });
     const concurrency = 4;
@@ -71,8 +75,8 @@ class FileScanner {
           if (i >= total) return;
           const file = files[i];
           await this.scanOne(file, maxBytes);
-          if ((i & 31) === 0) {
-            this.onEvent({ type: 'progress', done: i + 1, total, files: this.stats.files, threats: this.stats.threats });
+          if ((i & 15) === 0) {
+            this.onEvent({ type: 'progress', done: i + 1, total, files: this.stats.files, threats: this.stats.threats, path: file });
           }
         }
       })());

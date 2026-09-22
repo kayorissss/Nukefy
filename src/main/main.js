@@ -10,13 +10,14 @@ const fsp = fs.promises;
 const crypto = require('crypto');
 
 const { Settings, dataDir } = require('./engine/settings');
-const { SignatureDB } = require('./engine/signatures');
+const { SignatureDB, knowledgeFor } = require('./engine/signatures');
 const { Quarantine } = require('./engine/quarantine');
 const { ThreatStore } = require('./engine/store');
 const { FileScanner } = require('./engine/scanner');
 const { Protection } = require('./engine/protection');
 const { listProcesses, listConnections, analyzeProcesses } = require('./engine/procscan');
-const { collectAutorun, analyzeAutorun, checkHosts, restoreHosts } = require('./engine/persistence');
+const { collectAutorun, analyzeAutorun, checkHosts, analyzeHostsText, restoreHosts } = require('./engine/persistence');
+const { isTrustedPath } = require('./engine/constants');
 const { analyzeUrl } = require('./engine/webanalyze');
 const { vtTestKey } = require('./engine/reputation');
 const { writeJson } = require('./engine/util');
@@ -31,6 +32,13 @@ let scanSession = null;
 
 const VERSION = require('../../package.json').version;
 
+function selfDirs() {
+  const dirs = new Set();
+  try { dirs.add(path.dirname(process.execPath)); dirs.add(process.execPath); } catch (_) {}
+  try { const { app } = require('electron'); dirs.add(app.getAppPath()); dirs.add(path.dirname(app.getAppPath())); } catch (_) {}
+  return [...dirs];
+}
+
 function emit(evt) {
   if (win && !win.isDestroyed()) win.webContents.send('nukefy:evt', evt);
 }
@@ -44,7 +52,13 @@ async function ensureInit() {
   quarantine = await new Quarantine(path.join(dataDir(), 'quarantine')).init();
   store = new ThreatStore(path.join(dataDir(), 'threats.json'), { quarantine, settings, db });
   await store.init();
-  protection = new Protection({ db, settings, store, emit });
+  // миграция 1.0.4: чистим ложные срабатывания старых версий
+  store.purge((t) => (
+    (t.source === 'process' && ['Trojan.Dropper.ScriptDropper', 'Proc.Masquerade', 'Proc.TempRun'].includes(t.title)) ||
+    (t.source === 'hosts' && analyzeHostsText(t.line || '').length === 0) ||
+    (t.source === 'autorun' && isTrustedPath(t.command || t.path))
+  ));
+  protection = new Protection({ db, settings, store, emit, selfPaths: selfDirs() });
   if (protection.enabled()) protection.start();
 }
 
@@ -90,6 +104,7 @@ function startScan(opts) {
   const scanner = new FileScanner({
     db, settings: settings.get(), scanId, mode, roots,
     singleFile: opts.singleFile || null,
+    excludePrefixes: selfDirs(),
     onEvent: (e) => emit({ ...e, scanId }),
   });
   session.scanner = scanner;
@@ -143,7 +158,7 @@ function registerIpc() {
       const [procs, conns] = await Promise.all([listProcesses(), listConnections()]);
       out.processes = procs.length;
       out.connections = conns.length;
-      for (const t of analyzeProcesses(procs, conns, db)) {
+      for (const t of analyzeProcesses(procs, conns, db, { selfPaths: selfDirs() })) {
         const rec = store.add({ ...t, source: t.reason === 'pool-port' ? 'network' : 'process' });
         out.threats.push(rec);
       }
@@ -175,7 +190,7 @@ function registerIpc() {
     if (r.ok) emit({ type: 'threats:changed' });
     return r;
   });
-  H('threat:knowledge', async (id) => { await ensureInit(); const t = store.get(id); return t ? store.knowledge(t) : null; });
+  H('threat:knowledge', async (id, fam) => { await ensureInit(); const t = store.get(id); if (t) return store.knowledge(t); return knowledgeFor(fam || 'generic'); });
 
   H('quarantine:list', async () => { await ensureInit(); return quarantine.list(); });
   H('quarantine:restore', async (id) => { await ensureInit(); const r = await quarantine.restore(id); emit({ type: 'threats:changed' }); return r; });
@@ -225,7 +240,7 @@ function registerIpc() {
     // отдельная сессия самопроверки по каталогу selftest
     if (scanSession && scanSession.scanner && !scanSession.done) scanSession.scanner.cancel();
     const scanId = crypto.randomUUID();
-    const scanner = new FileScanner({ db, settings: settings.get(), scanId, mode: 'custom', roots: [dir], onEvent: (e) => emit({ ...e, scanId }) });
+    const scanner = new FileScanner({ db, settings: settings.get(), scanId, mode: 'custom', roots: [dir], excludePrefixes: selfDirs(), onEvent: (e) => emit({ ...e, scanId }) });
     scanSession = { id: scanId, mode: 'selftest', done: false, scanner };
     emit({ type: 'scan:start', scanId, mode: 'selftest', roots: [dir] });
     const r = await scanner.run();

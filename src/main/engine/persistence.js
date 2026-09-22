@@ -10,6 +10,7 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const { execCapture, IS_WIN } = require('./util');
+const { isTrustedPath } = require('./constants');
 
 const RUN_KEYS = [
   ['HKCU', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'],
@@ -147,7 +148,10 @@ function analyzeAutorun(items, db) {
     const sigHits = target ? db.matchText(low, null).filter((s) => s.cat !== 'risk' || /miner|trojan|virus/.test(s.cat)) : [];
     const tempish = /\\(temp|tmp)\\|\\appdata\\local\\temp|\/tmp\//.test(low);
     const masked = /(^|[\\/])(svchost|csrss|lsass|winlogon|services|smss)\.exe$/.test(low) && !/\\(system32|syswow64|winnt|windows)\\/.test(low);
-    if (masked) {
+    const trusted = isTrustedPath(target) || isTrustedPath(cmd);
+    if (trusted) {
+      continue;
+    } else if (masked) {
       threats.push({ ...it, reason: 'masquerade', fam: 'hidden-autorun', sev: 4, cat: 'trojan', title: 'Autorun.Masquerade', desc: 'Автозапуск под именем системного процесса вне системной папки' });
     } else if (tempish && target) {
       threats.push({ ...it, reason: 'temp', fam: 'hidden-autorun', sev: 3, cat: 'trojan', title: 'Autorun.TempTarget', desc: 'Автозапуск файла из временной папки' });
@@ -160,12 +164,9 @@ function analyzeAutorun(items, db) {
   return threats;
 }
 
-async function checkHosts() {
-  const p = hostsPath();
-  let text = '';
-  try { text = await fsp.readFile(p, 'utf8'); } catch (_) { return { ok: true, issues: [] }; }
+function analyzeHostsText(text) {
   const issues = [];
-  const lines = text.split(/\r?\n/);
+  const lines = String(text || '').split(/\r?\n/);
   for (const ln of lines) {
     const t = ln.trim();
     if (!t || t.startsWith('#')) continue;
@@ -173,13 +174,22 @@ async function checkHosts() {
     if (parts.length < 2) continue;
     const ip = parts[0], host = parts[1].toLowerCase();
     const blocked = /^(127\.|0\.0\.0\.0|::1)/.test(ip);
-    const secSite = /(virus|kaspersky|drweb|dr\.web|microsoft|windowsupdate|update\.microsoft|malware|abuse\.ch|virustotal|eset|avast|avg|defender|safebrowsing|gnu\.org|license)/.test(host);
+    // только сайты безопасности/обновлений/антивирусов; телеметрия и маркетинг microsoft не относятся к защите
+    const secSite = /(virustotal|virus|kaspersky|drweb|dr\.web|eset|avast|avg\.|malwarebytes|malware|abuse\.ch|windowsupdate|update\.microsoft|download\.microsoft|definitionupdates|safebrowsing|sophos|bitdefender|f-secure|trendmicro|emsisoft|crowdstrike|sentinelone|webroot|zonealarm|comodo|defender)/.test(host);
     if (blocked && secSite) {
       issues.push({ line: t, ip, host, reason: 'Блокировка сайта безопасности/обновлений через hosts' });
     } else if (!blocked && !/^(127\.|::1|0\.0\.0\.0)/.test(ip) && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && secSite) {
       issues.push({ line: t, ip, host, reason: `Перенаправление сайта безопасности на ${ip}` });
     }
   }
+  return issues;
+}
+
+async function checkHosts() {
+  const p = hostsPath();
+  let text = '';
+  try { text = await fsp.readFile(p, 'utf8'); } catch (_) { return { ok: true, issues: [] }; }
+  const issues = analyzeHostsText(text);
   return { ok: issues.length === 0, issues, path: p };
 }
 
@@ -216,4 +226,4 @@ async function removeAutorunEntry(item) {
   } catch (e) { return { ok: false, error: String(e && e.message) }; }
 }
 
-module.exports = { collectAutorun, analyzeAutorun, checkHosts, restoreHosts, removeAutorunEntry, startupFolders, hostsPath, RUN_KEYS };
+module.exports = { collectAutorun, analyzeAutorun, checkHosts, analyzeHostsText, restoreHosts, removeAutorunEntry, startupFolders, hostsPath, RUN_KEYS };

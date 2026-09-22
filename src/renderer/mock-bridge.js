@@ -19,7 +19,7 @@ if (!window.nukefy) {
     whitelist: [], ignored: [], urlHistory: [], autostart: false,
   };
   const state = () => ({
-    version: '1.0.3', platform: 'demo', arch: 'web', dataDir: '(демо-режим браузера)',
+    version: '1.0.4', platform: 'demo', arch: 'web', dataDir: '(демо-режим браузера)',
     dbVersion: '2026.09.22', dbSignatures: 22, protection: { enabled: settings.protection.enabled, intervalSec: 300, lastRun: null },
     counts: { active: threats.filter((t) => t.status === 'new').length, quarantined: QUAR.length },
     settings, threats, history: HIST, vtKeySet: !!settings.vtKey,
@@ -67,7 +67,7 @@ if (!window.nukefy) {
       if (action === 'quarantine' && t.path) QUAR.unshift({ id: 'q' + id, name: t.path.split(/[\\/]/).pop(), original: t.path, at: new Date().toISOString(), size: t.size || 1024, cat: t.cat });
       return { ok: true };
     },
-    knowledge: async (id) => { const t = threats.find((x) => x.id === id); return K[t ? t.fam : 'generic'] || K.generic; },
+    knowledge: async (id, fam) => { const t = threats.find((x) => x.id === id); return K[(t && t.fam) || fam] || K.generic; },
     quarantineList: async () => QUAR,
     quarantineRestore: async (id) => { const i = QUAR.findIndex((q) => q.id === id); if (i >= 0) QUAR.splice(i, 1); return { ok: true }; },
     quarantineRemove: async (id) => { const i = QUAR.findIndex((q) => q.id === id); if (i >= 0) QUAR.splice(i, 1); return { ok: true }; },

