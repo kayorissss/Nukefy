@@ -29,7 +29,7 @@ let store = null;
 let protection = null;
 let scanSession = null;
 
-const VERSION = '1.0.0';
+const VERSION = require('../../package.json').version;
 
 function emit(evt) {
   if (win && !win.isDestroyed()) win.webContents.send('nukefy:evt', evt);
