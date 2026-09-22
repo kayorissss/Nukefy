@@ -58,15 +58,13 @@
           "target": "nsis",
           "arch": [
             "x64"
-          ],
-          "artifactName": "Nukefy-Setup-${version}.${ext}"
+          ]
         },
         {
           "target": "portable",
           "arch": [
             "x64"
-          ],
-          "artifactName": "Nukefy-Portable-${version}.${ext}"
+          ]
         }
       ]
     },

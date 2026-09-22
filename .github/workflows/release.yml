@@ -52,6 +52,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Rename artifacts
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Get-ChildItem release\*.exe | ForEach-Object {
+            if ($_.Name -match 'Setup') { Rename-Item $_.FullName -NewName ("Nukefy-Setup-" + $v + ".exe") }
+            else { Rename-Item $_.FullName -NewName ("Nukefy-Portable-" + $v + ".exe") }
+          }
+          Get-ChildItem release
+
       - name: List artifacts
         run: dir release
 
