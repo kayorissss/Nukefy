@@ -36,8 +36,15 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          $tail = (Get-Content build.log -Tail 120 -Raw)
-          gh api ("repos/" + $env:GITHUB_REPOSITORY + "/commits/" + $env:GITHUB_SHA + "/comments") -f body=("ELECTRON-BUILDER LOG TAIL```" + $tail + "```")
+          $tail = (Get-Content build.log -Tail 150 -Raw)
+          Set-Content -Path ci-build-log.txt -Value $tail
+          git config user.email ci@nukefy.local
+          git config user.name nukefy-ci
+          git add ci-build-log.txt
+          git commit -m "ci: build log tail [skip ci]"
+          git push origin HEAD:arena/01a0cace-nukefy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: List artifacts
         run: dir release
