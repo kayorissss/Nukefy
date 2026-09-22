@@ -88,7 +88,6 @@
       ],
       "category": "Utility",
       "icon": "build/icon.png"
-    },
-    "publish": null
+    }
   }
 }

@@ -27,7 +27,17 @@ jobs:
         run: npm test
 
       - name: Build Windows artifacts
-        run: npx electron-builder --win --publish never
+        shell: pwsh
+        run: |
+          npx electron-builder --win --publish never *>&1 | Tee-Object -FilePath build.log
+          exit $LASTEXITCODE
+
+      - name: Report build log on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $tail = (Get-Content build.log -Tail 120 -Raw)
+          gh api ("repos/" + $env:GITHUB_REPOSITORY + "/commits/" + $env:GITHUB_SHA + "/comments") -f body=("ELECTRON-BUILDER LOG TAIL```" + $tail + "```")
 
       - name: List artifacts
         run: dir release
