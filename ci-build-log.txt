@@ -1,0 +1,35 @@
+  • electron-builder  version=24.13.3 os=10.0.26100
+  • loaded configuration  file=package.json ("build" field)
+  ⨯ Invalid configuration object. electron-builder 24.13.3 has been initialized using a configuration object that does not match the API schema.
+ - configuration.win should be one of these:
+   object { additionalCertificateFile?, appId?, artifactName?, asar?, asarUnpack?, certificateFile?, certificatePassword?, certificateSha1?, certificateSubjectName?, compression?, cscKeyPassword?, cscLink?, defaultArch?, detectUpdateChannel?, electronLanguages?, electronUpdaterCompatibility?, executableName?, extraFiles?, extraResources?, fileAssociations?, files?, forceCodeSigning?, generateUpdatesFilesForAllChannels?, icon?, legalTrademarks?, protocols?, publish?, publisherName?, releaseInfo?, requestedExecutionLevel?, rfc3161TimeStampServer?, sign?, signAndEditExecutable?, signDlls?, signExts?, signingHashAlgorithms?, target?, timeStampServer?, verifyUpdateCodeSignature? } | null
+   -> Options related to how build Windows targets.
+   Details:
+    * configuration.win.target[0] has an unknown property 'artifactName'. These properties are valid:
+      object { target, arch? }
+    * configuration.win.target[1] has an unknown property 'artifactName'. These properties are valid:
+      object { target, arch? }
+     How to fix:
+     1. Open https://www.electron.build/configuration/win
+     2. Search the option name on the page (or type in into Search to find across the docs).
+       * Not found? The option was deprecated or not exists (check spelling).
+       * Found? Check that the option in the appropriate place. e.g. "title" only in the "dmg", not in the root.
+  failedTask=build stackTrace=ValidationError: Invalid configuration object. electron-builder 24.13.3 has been initialized using a configuration object that does not match the API schema.
+ - configuration.win should be one of these:
+   object { additionalCertificateFile?, appId?, artifactName?, asar?, asarUnpack?, certificateFile?, certificatePassword?, certificateSha1?, certificateSubjectName?, compression?, cscKeyPassword?, cscLink?, defaultArch?, detectUpdateChannel?, electronLanguages?, electronUpdaterCompatibility?, executableName?, extraFiles?, extraResources?, fileAssociations?, files?, forceCodeSigning?, generateUpdatesFilesForAllChannels?, icon?, legalTrademarks?, protocols?, publish?, publisherName?, releaseInfo?, requestedExecutionLevel?, rfc3161TimeStampServer?, sign?, signAndEditExecutable?, signDlls?, signExts?, signingHashAlgorithms?, target?, timeStampServer?, verifyUpdateCodeSignature? } | null
+   -> Options related to how build Windows targets.
+   Details:
+    * configuration.win.target[0] has an unknown property 'artifactName'. These properties are valid:
+      object { target, arch? }
+    * configuration.win.target[1] has an unknown property 'artifactName'. These properties are valid:
+      object { target, arch? }
+     How to fix:
+     1. Open https://www.electron.build/configuration/win
+     2. Search the option name on the page (or type in into Search to find across the docs).
+       * Not found? The option was deprecated or not exists (check spelling).
+       * Found? Check that the option in the appropriate place. e.g. "title" only in the "dmg", not in the root.
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           at validate (D:\a\Nukefy\Nukefy\node_modules\@develar\schema-utils\dist\validate.js:86:11)
+    at validateConfig (D:\a\Nukefy\Nukefy\node_modules\app-builder-lib\src\util\config.ts:240:3)
+    at Packager._build (D:\a\Nukefy\Nukefy\node_modules\app-builder-lib\src\packager.ts:345:5)
+    at Packager.build (D:\a\Nukefy\Nukefy\node_modules\app-builder-lib\src\packager.ts:340:12)
+    at executeFinally (D:\a\Nukefy\Nukefy\node_modules\builder-util\src\promise.ts:12:14)
