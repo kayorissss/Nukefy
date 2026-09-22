@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -49,9 +49,6 @@ jobs:
           node report-log.js
           curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" --data @payload.json || true
-          git add ci-build-log.txt || true
-          git -c user.email=ci@nukefy.local -c user.name=nukefy-ci commit -m "ci: build log tail [skip ci]" || true
-          git push origin HEAD:arena/01a0cace-nukefy || true
           exit 0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
