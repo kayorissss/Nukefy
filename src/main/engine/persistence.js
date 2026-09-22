@@ -75,7 +75,8 @@ async function collectAutorun() {
       for (const ln of lines) {
         const cols = splitCsv(ln);
         if (cols.length < 10) continue;
-        const taskName = cols[0], taskToRun = cols[cols.length - 2] || cols[cols.length - 1];
+        const taskName = cols[1] || cols[0];
+        const taskToRun = cols[8] || '';
         if (!taskToRun || taskToRun === 'N/A' || taskToRun === '#') continue;
         const low = taskToRun.toLowerCase();
         if (!/\.(exe|bat|cmd|vbs|js|ps1|scr|com)/.test(low)) continue;

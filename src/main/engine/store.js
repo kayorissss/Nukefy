@@ -37,11 +37,11 @@ class ThreatStore {
   }
   keyOf(t) {
     if (t.source === 'file') return `f:${t.path}:${t.title}`;
-    if (t.source === 'process') return `p:${t.pid}:${t.title}`;
+    if (t.source === 'process') return `p:${t.path || t.name}:${t.title}`;
     if (t.source === 'autorun') return `a:${t.key}:${t.name}`;
     if (t.source === 'hosts') return `h:${t.host || t.line}`;
     if (t.source === 'url') return `u:${t.url}:${t.title}`;
-    return `x:${t.title}:${t.path || t.pid || ''}`;
+    return `x:${t.title}:${t.path || t.name || t.host || ''}`;
   }
   ignoredKeys() { return new Set(this.deps.settings.get().ignored || []); }
   isIgnored(t) { return this.ignoredKeys().has(this.keyOf(t)); }

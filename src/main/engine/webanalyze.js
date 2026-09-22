@@ -82,8 +82,8 @@ function fetchPage(urlStr, maxRedirects = 6) {
       if (n > maxRedirects) return resolve({ ok: false, error: 'Слишком много редиректов', chain, tlsError });
       let u;
       try { u = new URL(current); } catch (e) { return resolve({ ok: false, error: 'Некорректный URL', chain, tlsError }); }
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return resolve({ ok: false, error: 'Поддерживаются только http/https', chain, tlsError });
       const mod = u.protocol === 'http:' ? http : https;
-      if (mod !== https && u.protocol !== 'http:') return resolve({ ok: false, error: 'Поддерживаются только http/https', chain, tlsError });
       const req = mod.request({
         method: 'GET', hostname: u.hostname, port: u.port || (u.protocol === 'http:' ? 80 : 443),
         path: u.pathname + u.search,
