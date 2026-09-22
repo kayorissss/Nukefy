@@ -1,6 +1,6 @@
 {
   "name": "nukefy",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Nukefy — антивирус, антитроян и антимайнер",
   "main": "src/main/main.js",
   "scripts": {

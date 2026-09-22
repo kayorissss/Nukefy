@@ -62,6 +62,13 @@ jobs:
           }
           Get-ChildItem release
 
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem release\*.exe | ForEach-Object { ((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()) + "  " + $_.Name }
+          Set-Content -Path release\SHA256SUMS.txt -Value ($lines -join "`r`n")
+          Get-Content release\SHA256SUMS.txt
+
       - name: List artifacts
         run: dir release
 
@@ -76,6 +83,7 @@ jobs:
           files: |
             release/Nukefy-Setup-*.exe
             release/Nukefy-Portable-*.exe
+            release/SHA256SUMS.txt
           body: |
             ## Nukefy — антивирус, антитроян и антимайнер
 
@@ -86,3 +94,12 @@ jobs:
             автозапуска, планировщика и hosts, резидентная защита, карантин с восстановлением,
             анализ ссылок и страниц (фишинг, слежка, трекеры, браузерные майнеры), облачные базы
             MalwareBazaar и URLhaus (abuse.ch) без ключа, VirusTotal — по бесплатному ключу пользователя.
+
+            ### Про красный экран SmartScreen («Неизвестный издатель»)
+
+            EXE не подписан сертификатом код-подписи (OV/EV-сертификаты — платная услуга удостоверяющих
+            центров), поэтому SmartScreen предупреждает о любом молодом неподписанном приложении.
+            Это не признак вредоносности: сверьте SHA-256 из `SHA256SUMS.txt` с файлом и нажимайте
+            «Выполнить в любом случае» (или ПКМ по файлу → Свойства → «Разблокировать»).
+            Репутация SmartScreen нарастает с количеством загрузок; полное снятие предупреждения —
+            подпись сертификата, будет добавлена при его появлении.
