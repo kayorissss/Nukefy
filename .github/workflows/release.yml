@@ -1,0 +1,55 @@
+name: Build & Release (Windows EXE)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-win:
+    name: Windows installer + portable EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Engine tests
+        run: npm test
+
+      - name: Build Windows artifacts
+        run: npx electron-builder --win --publish never
+
+      - name: List artifacts
+        run: dir release
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', '1.0.0') }}
+          name: Nukefy ${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.0' }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release/Nukefy-Setup-*.exe
+            release/Nukefy-Portable-*.exe
+          body: |
+            ## Nukefy — антивирус, антитроян и антимайнер
+
+            - **Nukefy-Setup-<ver>.exe** — установщик (NSIS): ярлыки, меню «Пуск», удаление через «Программы и компоненты».
+            - **Nukefy-Portable-<ver>.exe** — портативная версия: один файл, работает без установки.
+
+            Что внутри: локальные сигнатуры и эвристики (вирусы / трояны / майнеры), проверка процессов,
+            автозапуска, планировщика и hosts, резидентная защита, карантин с восстановлением,
+            анализ ссылок и страниц (фишинг, слежка, трекеры, браузерные майнеры), облачные базы
+            MalwareBazaar и URLhaus (abuse.ch) без ключа, VirusTotal — по бесплатному ключу пользователя.

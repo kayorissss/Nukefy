@@ -1,0 +1,94 @@
+{
+  "name": "nukefy",
+  "version": "1.0.0",
+  "description": "Nukefy — антивирус, антитроян и антимайнер",
+  "main": "src/main/main.js",
+  "scripts": {
+    "test": "node test/engine.test.js",
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "dist:linux": "electron-builder --linux dir --publish never",
+    "preview": "node tools/preview-server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kayorissss/Nukefy.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kayorissss/Nukefy/issues"
+  },
+  "homepage": "https://github.com/kayorissss/Nukefy#readme",
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "png-to-ico": "^3.0.2",
+    "resedit": "^3.1.0"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.7.3"
+  },
+  "build": {
+    "appId": "app.nukefy.antivirus",
+    "productName": "Nukefy",
+    "copyright": "Copyright © 2026 Nukefy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "nukefy-db/**/*",
+      "assets/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "nukefy-db",
+        "to": "nukefy-db"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ],
+          "artifactName": "Nukefy-Setup-${version}.${ext}"
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ],
+          "artifactName": "Nukefy-Portable-${version}.${ext}"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nukefy",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Utility",
+      "icon": "build/icon.png"
+    },
+    "publish": null
+  }
+}
