@@ -24,7 +24,10 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Engine tests
-        run: npm test
+        shell: bash
+        run: |
+          npm test 2>&1 | tee test.log
+          exit ${PIPESTATUS[0]}
 
       - name: Build Windows artifacts
         shell: bash
@@ -42,6 +45,7 @@ jobs:
         shell: bash
         run: |
           tail -n 150 build.log > ci-build-log.txt 2>/dev/null || echo "build.log отсутствует" > ci-build-log.txt
+          { echo ""; echo "--- test.log ---"; tail -n 60 test.log 2>/dev/null || echo "test.log отсутствует"; } >> ci-build-log.txt
           node report-log.js
           curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" --data @payload.json || true
