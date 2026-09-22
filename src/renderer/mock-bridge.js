@@ -19,7 +19,7 @@ if (!window.nukefy) {
     whitelist: [], ignored: [], urlHistory: [], autostart: false,
   };
   const state = () => ({
-    version: '1.0.2', platform: 'demo', arch: 'web', dataDir: '(демо-режим браузера)',
+    version: '1.0.3', platform: 'demo', arch: 'web', dataDir: '(демо-режим браузера)',
     dbVersion: '2026.09.22', dbSignatures: 22, protection: { enabled: settings.protection.enabled, intervalSec: 300, lastRun: null },
     counts: { active: threats.filter((t) => t.status === 'new').length, quarantined: QUAR.length },
     settings, threats, history: HIST, vtKeySet: !!settings.vtKey,

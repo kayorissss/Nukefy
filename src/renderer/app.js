@@ -32,26 +32,37 @@ const BOOT_STEPS = [
   ['Резидентная защита', 1900],
   ['Интерфейс', 2300],
 ];
+function normalizeState() {
+  if (!STATE || typeof STATE !== 'object' || STATE.ok === false) STATE = null;
+  if (!STATE) STATE = {};
+  STATE.version = STATE.version || '1.0.3';
+  STATE.threats = Array.isArray(STATE.threats) ? STATE.threats : [];
+  STATE.history = Array.isArray(STATE.history) ? STATE.history : [];
+  STATE.counts = STATE.counts || { active: 0, quarantined: 0 };
+  STATE.settings = STATE.settings || { cloud: {}, protection: {}, actions: {}, checks: {}, urlHistory: [] };
+  STATE.settings.cloud = STATE.settings.cloud || {};
+  STATE.settings.protection = STATE.settings.protection || {};
+  STATE.settings.actions = STATE.settings.actions || {};
+  STATE.settings.checks = STATE.settings.checks || {};
+  STATE.settings.urlHistory = STATE.settings.urlHistory || [];
+  return STATE;
+}
 async function boot() {
-  const stepsBox = $('#bootSteps');
-  BOOT_STEPS.forEach(([label]) => {
-    const d = document.createElement('div');
-    d.className = 'boot-step'; d.textContent = label; stepsBox.appendChild(d);
-  });
-  const nodes = $$('.boot-step');
-  const statePromise = api.state().then((s) => { STATE = s; return s; }).catch((e) => { STATE = null; });
+  const statePromise = api.state().then((s) => { STATE = s; return s; }).catch(() => { STATE = null; });
   BOOT_STEPS.forEach(([label, at], i) => {
     setTimeout(() => {
-      $('#bootStatus').textContent = label + '…';
-      nodes[i].classList.add('done');
-      $('#bootBar').style.width = Math.round(((i + 1) / BOOT_STEPS.length) * 100) + '%';
+      const st = $('#bootStatus'); if (st) st.textContent = label + '…';
+      const bar = $('#bootBar'); if (bar) bar.style.width = Math.round(((i + 1) / BOOT_STEPS.length) * 100) + '%';
     }, at);
   });
   await statePromise;
+  normalizeState();
   await new Promise((r) => setTimeout(r, 2750));
+  const app = $('#app');
+  app.classList.remove('hidden');
   $('#boot').classList.add('gone');
-  $('#app').classList.add('in');
-  setTimeout(() => { $('#boot').remove(); }, 800);
+  requestAnimationFrame(() => app.classList.add('in'));
+  setTimeout(() => { const b = $('#boot'); if (b) b.remove(); }, 800);
   initApp();
 }
 
@@ -90,6 +101,7 @@ function bindTitlebar() {
 /* ---------------- данные ---------------- */
 async function refreshAll() {
   try { STATE = await api.state(); } catch (_) {}
+  normalizeState();
   refreshDashboard();
   renderThreats();
   renderQuarantine();
