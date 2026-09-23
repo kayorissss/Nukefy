@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;">
+<title>Nukefy</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- ======================= ЗАГРУЗОЧНЫЙ ЭКРАН ======================= -->
+<div id="boot" class="boot">
+  <div class="boot-inner">
+    <div class="boot-logo">
+      <svg viewBox="0 0 120 140" class="boot-shield" aria-hidden="true">
+        <path class="shield-path" d="M60 8 L106 26 V64 C106 96 86 118 60 132 C34 118 14 96 14 64 V26 Z"/>
+        <g class="shield-core">
+          <circle cx="60" cy="66" r="5.5"/>
+          <ellipse cx="60" cy="66" rx="26" ry="10.5" transform="rotate(28 60 66)"/>
+          <ellipse cx="60" cy="66" rx="26" ry="10.5" transform="rotate(-28 60 66)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="boot-title">NUKEFY</div>
+    <div class="boot-sub" id="bootStatus">Инициализация ядра…</div>
+    <div class="boot-bar"><div class="boot-bar-fill" id="bootBar"></div></div>
+  </div>
+</div>
+
+<!-- ======================= ПРИЛОЖЕНИЕ ======================= -->
+<div id="app" class="app hidden">
+  <header class="titlebar">
+    <div class="tb-left">
+      <svg viewBox="0 0 120 140" class="tb-logo"><path d="M60 8 L106 26 V64 C106 96 86 118 60 132 C34 118 14 96 14 64 V26 Z"/><circle cx="60" cy="66" r="5.5"/><ellipse cx="60" cy="66" rx="26" ry="10.5" transform="rotate(28 60 66)"/><ellipse cx="60" cy="66" rx="26" ry="10.5" transform="rotate(-28 60 66)"/></svg>
+      <span class="tb-name">NUKEFY</span>
+      <span class="tb-ver" id="tbVer">1.0.0</span>
+    </div>
+    <div class="tb-center" id="tbStatus">Система защищена</div>
+    <div class="tb-right">
+      <button class="tb-dot" id="btnMin" title="Свернуть"></button>
+      <button class="tb-dot" id="btnFull" title="Оконный режим"></button>
+      <button class="tb-dot tb-close" id="btnQuit" title="Выход"></button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="side">
+      <button class="nav-item active" data-view="dashboard"><span class="nav-ico">◇</span>Обзор</button>
+      <button class="nav-item" data-view="scan"><span class="nav-ico">◎</span>Сканирование</button>
+      <button class="nav-item" data-view="threats"><span class="nav-ico">!</span>Угрозы<span class="nav-badge" id="badgeThreats" hidden>0</span></button>
+      <button class="nav-item" data-view="url"><span class="nav-ico">∞</span>Ссылки</button>
+      <button class="nav-item" data-view="quarantine"><span class="nav-ico">▣</span>Карантин</button>
+      <button class="nav-item" data-view="settings"><span class="nav-ico">≡</span>Настройки</button>
+      <div class="side-foot">
+        <div class="prot-state" id="protState"><span class="prot-led"></span>Резидентная защита</div>
+      </div>
+    </nav>
+
+    <main class="content">
+      <!-- ---------- ОБЗОР ---------- -->
+      <section class="view active" id="view-dashboard">
+        <div class="view-head"><h1>Обзор</h1><p class="muted" id="dashSummary"></p></div>
+        <div class="cards">
+          <div class="stat-card"><div class="stat-num" id="stActive">0</div><div class="stat-lbl">активных угроз</div></div>
+          <div class="stat-card"><div class="stat-num" id="stFiles">0</div><div class="stat-lbl">файлов проверено</div></div>
+          <div class="stat-card"><div class="stat-num" id="stQuar">0</div><div class="stat-lbl">в карантине</div></div>
+          <div class="stat-card"><div class="stat-num" id="stDb">—</div><div class="stat-lbl">сигнатур в базе</div></div>
+        </div>
+        <div class="dash-grid">
+          <div class="panel">
+            <div class="panel-head"><h2>Статус защиты</h2></div>
+            <div class="shield-status" id="shieldStatus">
+              <svg viewBox="0 0 120 140" class="big-shield"><path d="M60 8 L106 26 V64 C106 96 86 118 60 132 C34 118 14 96 14 64 V26 Z"/><circle cx="60" cy="66" r="5.5"/><ellipse cx="60" cy="66" rx="26" ry="10.5" transform="rotate(28 60 66)"/><ellipse cx="60" cy="66" rx="26" ry="10.5" transform="rotate(-28 60 66)"/></svg>
+              <div><div class="shield-verdict" id="shieldVerdict">Защищено</div><div class="muted" id="shieldNote"></div></div>
+            </div>
+            <div class="quick-actions">
+              <button class="btn btn-primary" id="btnQuickScan">Быстрая проверка</button>
+              <button class="btn" id="btnFullScan">Полное сканирование</button>
+              <button class="btn" id="btnSelfTest">Самопроверка движка</button>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Последние события</h2></div>
+            <div class="list" id="dashEvents"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- СКАНИРОВАНИЕ ---------- -->
+      <section class="view" id="view-scan">
+        <div class="view-head"><h1>Сканирование</h1><p class="muted">Локальные сигнатуры, эвристики и облачные базы репутации</p></div>
+        <div class="scan-layout">
+          <div class="scan-center panel">
+            <div class="radar" id="radar">
+              <div class="radar-ring r1"></div><div class="radar-ring r2"></div><div class="radar-ring r3"></div>
+              <div class="radar-sweep"></div>
+              <div class="radar-core"><span id="scanPct">0%</span></div>
+            </div>
+            <div class="scan-phase" id="scanPhase">Готов к проверке</div>
+            <div class="scan-path" id="scanPath">Выберите режим и запустите проверку</div>
+            <div class="scan-modes">
+              <button class="mode-btn active" data-mode="quick"><b>Быстрая</b><span>память, автозапуск, временные папки</span></button>
+              <button class="mode-btn" data-mode="full"><b>Полная</b><span>все диски и профили пользователей</span></button>
+              <button class="mode-btn" data-mode="custom"><b>Своя папка</b><span>выбор каталогов вручную</span></button>
+            </div>
+            <div class="scan-ctl">
+              <button class="btn btn-primary btn-lg" id="btnScanStart">Начать проверку</button>
+              <button class="btn btn-lg" id="btnScanCancel" disabled>Остановить</button>
+            </div>
+            <div class="scan-stats" id="scanStats"></div>
+          </div>
+          <div class="scan-side">
+            <div class="tabs" id="scanTabs">
+              <button class="tab active" data-cat="all">Все</button>
+              <button class="tab" data-cat="virus">Вирусы</button>
+              <button class="tab" data-cat="trojan">Трояны</button>
+              <button class="tab" data-cat="miner">Майнеры</button>
+              <button class="tab" data-cat="risk">Риски</button>
+            </div>
+            <div class="list scan-results" id="scanResults"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- УГРОЗЫ ---------- -->
+      <section class="view" id="view-threats">
+        <div class="view-head"><h1>Обнаруженные угрозы</h1><p class="muted">Наведите на значок «?», чтобы узнать, что делает объект и чем опасен</p></div>
+        <div class="threat-layout">
+          <div class="list threat-list" id="threatList"></div>
+          <aside class="threat-detail panel" id="threatDetail"></aside>
+        </div>
+      </section>
+
+      <!-- ---------- ССЫЛКИ ---------- -->
+      <section class="view" id="view-url">
+        <div class="view-head"><h1>Анализ ссылки</h1><p class="muted">Проверка адреса и страницы на вирусы, фишинг и слежку</p></div>
+        <div class="url-bar">
+          <input id="urlInput" type="text" placeholder="https://example.com или домен" spellcheck="false" autocomplete="off">
+          <button class="btn btn-primary" id="btnUrlAnalyze">Проверить</button>
+        </div>
+        <div class="url-steps" id="urlSteps"></div>
+        <div id="urlResult"></div>
+        <div class="panel url-history-panel"><div class="panel-head"><h2>История проверок</h2></div><div class="list" id="urlHistory"></div></div>
+      </section>
+
+      <!-- ---------- КАРАНТИН ---------- -->
+      <section class="view" id="view-quarantine">
+        <div class="view-head"><h1>Карантин</h1><p class="muted">Изолированные объекты можно восстановить или удалить навсегда</p></div>
+        <div class="list" id="quarantineList"></div>
+      </section>
+
+      <!-- ---------- НАСТРОЙКИ ---------- -->
+      <section class="view" id="view-settings">
+        <div class="view-head"><h1>Настройки</h1><p class="muted">Движок, облачные базы и резидентная защита</p></div>
+        <div class="settings-grid">
+          <div class="panel">
+            <div class="panel-head"><h2>Облачные базы</h2></div>
+            <label class="field"><span>API-ключ VirusTotal (бесплатный, до 4 запросов/мин)</span>
+              <div class="row"><input id="setVtKey" type="password" placeholder="вставьте публичный ключ v3"><button class="btn" id="btnVtTest">Проверить</button></div>
+              <small class="muted" id="vtNote">Без ключа Nukefy работает на локальной базе и бесплатных сервисах abuse.ch</small>
+            </label>
+            <label class="check"><input type="checkbox" id="setMb"><span>MalwareBazaar — репутация файлов по SHA-256</span></label>
+            <label class="check"><input type="checkbox" id="setUh"><span>URLhaus — база вредоносных ссылок и доменов</span></label>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Защита</h2></div>
+            <label class="check"><input type="checkbox" id="setProt"><span>Резидентная защита (фоновая проверка)</span></label>
+            <label class="field"><span>Интервал фоновой проверки, сек</span><input id="setProtInt" type="number" min="30" max="3600" step="30"></label>
+            <label class="field"><span>Действие при угрозе в фоне</span>
+              <select id="setOnThreat"><option value="notify">Только уведомлять</option><option value="quarantine">Автоматически изолировать файлы</option></select>
+            </label>
+            <label class="check"><input type="checkbox" id="setAuto"><span>Запускать Nukefy вместе с Windows</span></label>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Что проверять</h2></div>
+            <label class="check"><input type="checkbox" id="chkProc"><span>Процессы и их командные строки</span></label>
+            <label class="check"><input type="checkbox" id="chkPers"><span>Автозапуск: реестр, планировщик, Startup</span></label>
+            <label class="check"><input type="checkbox" id="chkNet"><span>Сеть: майнинг-порты, подмена hosts</span></label>
+            <label class="check"><input type="checkbox" id="chkHash"><span>Облачная репутация исполняемых файлов</span></label>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>О программе</h2></div>
+            <div class="about" id="aboutBox"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="mock-bridge.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
