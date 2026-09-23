@@ -162,6 +162,37 @@ async function vtTestKey(key) {
   return { ok: false, error: `Сервис ответил ${r.status || r.error || 'неизвестно'}.` };
 }
 
+/** Отправка образца в VirusTotal (нужен ключ; лимит бесплатного тарифа). */
+async function vtSubmit(file, key) {
+  const fs = require('fs');
+  const path = require('path');
+  let buf;
+  try { buf = fs.readFileSync(file); } catch (e) { return { ok: false, error: String(e && e.message) }; }
+  if (buf.length > 32 * 1024 * 1024) return { ok: false, error: 'файл больше 32 МБ — отправка недоступна в бесплатном тарифе' };
+  const boundary = '----Nukefy' + Date.now().toString(16);
+  const head = Buffer.from(
+    '--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + path.basename(file).replace(/"/g, '') + '"\r\nContent-Type: application/octet-stream\r\n\r\n');
+  const tail = Buffer.from('\r\n--' + boundary + '--\r\n');
+  const body = Buffer.concat([head, buf, tail]);
+  const r = await new Promise((resolve) => {
+    const req = https.request({
+      method: 'POST', hostname: 'www.virustotal.com', path: '/api/v3/files',
+      headers: { 'x-apikey': key, 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': body.length, 'User-Agent': UA },
+      timeout: 60000,
+    }, (res) => {
+      let b = ''; res.on('data', (d) => { if (b.length < 64 * 1024) b += d; });
+      res.on('end', () => resolve({ status: res.statusCode, body: b }));
+    });
+    req.on('error', (e) => resolve({ status: 0, body: '', error: String(e && e.message) }));
+    req.on('timeout', () => { try { req.destroy(); } catch (_) {} });
+    req.end(body);
+  });
+  if (r.status === 200) {
+    try { return { ok: true, id: JSON.parse(r.body).data && JSON.parse(r.body).data.id }; } catch (_) { return { ok: true }; }
+  }
+  return { ok: false, error: 'VirusTotal ответил ' + (r.status || r.error || 'ошибкой') };
+}
+
 /* ---------------- Агрегатор ---------------- */
 async function reputationForFile(sha256, settings) {
   const out = { sha256, services: {} };
@@ -184,5 +215,5 @@ async function reputationForFile(sha256, settings) {
 
 module.exports = {
   mbLookup, urlhausUrl, urlhausHost, urlhausPayload,
-  vtFile, vtUrl, vtTestKey, reputationForFile, httpRequest, jsonRequest,
+  vtFile, vtUrl, vtTestKey, vtSubmit, reputationForFile, httpRequest, jsonRequest,
 };

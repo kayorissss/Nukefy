@@ -3,7 +3,7 @@
  * Nukefy — главный процесс Electron.
  * Полноэкранное окно, плавный ступенчатый запуск, IPC-мост к движку.
  */
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -16,7 +16,9 @@ const { ThreatStore } = require('./engine/store');
 const { FileScanner } = require('./engine/scanner');
 const { Protection } = require('./engine/protection');
 const { listProcesses, listConnections, analyzeProcesses } = require('./engine/procscan');
-const { collectAutorun, analyzeAutorun, checkHosts, analyzeHostsText, restoreHosts } = require('./engine/persistence');
+const { collectAutorun, analyzeAutorun, checkHosts, analyzeHostsText, checkBootSectors, restoreHosts } = require('./engine/persistence');
+const { listTempModuleThreats } = require('./engine/procscan');
+const updater = require('./engine/updater');
 const { isTrustedPath } = require('./engine/constants');
 const { analyzeUrl } = require('./engine/webanalyze');
 const { vtTestKey } = require('./engine/reputation');
@@ -58,8 +60,50 @@ async function ensureInit() {
     (t.source === 'hosts' && analyzeHostsText(t.line || '').length === 0) ||
     (t.source === 'autorun' && isTrustedPath(t.command || t.path))
   ));
-  protection = new Protection({ db, settings, store, emit, selfPaths: selfDirs() });
+  const protEmit = (evt) => {
+    emit(evt);
+    if (evt.type === 'protection:alert' && tray && !(settings.get().ui || {}).quiet) {
+      try {
+        tray.displayBalloon({ title: 'Nukefy — резидентная защита', content: (evt.threat.title || '') + '. ' + String(evt.threat.desc || '').slice(0, 90), icon: nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'icon.png')) });
+      } catch (_) {}
+    }
+  };
+  protection = new Protection({
+    db, settings, store, emit: protEmit, selfPaths: selfDirs(),
+    onSchedule: (mode) => startScan({ mode }),
+  });
+  store.addEvent('system', { message: 'Nukefy запущен, версия ' + VERSION });
   if (protection.enabled()) protection.start();
+}
+
+let tray = null;
+function createTray() {
+  try {
+    const img = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'icon.png')).resize({ width: 24, height: 24 });
+    tray = new Tray(img);
+    tray.setToolTip('Nukefy — защита активна');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Открыть Nukefy', click: () => { if (win) { win.show(); win.focus(); } } },
+      { label: 'Быстрая проверка', click: () => { startScan({ mode: 'quick' }); if (win) win.show(); } },
+      { type: 'separator' },
+      { label: 'Выход', click: () => app.quit() },
+    ]));
+    tray.on('double-click', () => { if (win) { win.show(); win.focus(); } });
+  } catch (_) {}
+}
+
+function autoUpdateLoop() {
+  setInterval(async () => {
+    try {
+      const au = settings.get().autoupdate || {};
+      if (!au.enabled) return;
+      const last = au.lastCheck ? Date.parse(au.lastCheck) : 0;
+      if (Date.now() - last < (au.intervalH || 4) * 3600e3) return;
+      const res = await updater.checkAndUpdate({ currentVersion: db.version });
+      await settings.set({ autoupdate: { ...au, lastCheck: new Date().toISOString(), lastVersion: res.updated ? res.version : au.lastVersion } });
+      if (res.updated) { db.load(); store.addEvent('update', { message: 'Базы обновлены до ' + res.version }); emit({ type: 'db:updated', version: res.version }); }
+    } catch (_) {}
+  }, 10 * 60e3);
 }
 
 function createWindow() {
@@ -105,7 +149,10 @@ function startScan(opts) {
     db, settings: settings.get(), scanId, mode, roots,
     singleFile: opts.singleFile || null,
     excludePrefixes: selfDirs(),
-    onEvent: (e) => emit({ ...e, scanId }),
+    onEvent: (e) => {
+      if (e.type === 'threat') { store.add(e.threat); store.addEvent('detect', { title: e.threat.title, path: e.threat.path, cat: e.threat.cat, sev: e.threat.sev }); }
+      emit({ ...e, scanId });
+    },
   });
   session.scanner = scanner;
   scanner.run().then(async (r) => {
@@ -145,11 +192,64 @@ function registerIpc() {
       threats: store.all(),
       history: store.historyList(),
       vtKeySet: !!settings.get().vtKey,
+      dbLastVersion: settings.get().autoupdate.lastVersion || null,
+      dbLastCheck: settings.get().autoupdate.lastCheck || null,
+      events: store.eventsList().slice(0, 40),
     };
   });
 
   H('scan:start', async (opts = {}) => { await ensureInit(); return startScan(opts); });
   H('scan:cancel', async () => { if (scanSession && scanSession.scanner) scanSession.scanner.cancel(); return { ok: true }; });
+  H('scan:pause', async () => { if (scanSession && scanSession.scanner) { scanSession.scanner.pause(); emit({ type: 'scan:paused' }); } return { ok: true }; });
+  H('scan:resume', async () => { if (scanSession && scanSession.scanner) { scanSession.scanner.resume(); emit({ type: 'scan:resumed' }); } return { ok: true }; });
+
+  H('journal:list', async () => { await ensureInit(); return store.eventsList(); });
+  H('journal:export', async (format) => {
+    await ensureInit();
+    const r = await dialog.showSaveDialog(win, { defaultPath: 'nukefy-journal.' + (format === 'csv' ? 'csv' : 'json') });
+    if (r.canceled) return { ok: false };
+    const ev = store.eventsList();
+    let body;
+    if (format === 'csv') {
+      const escv = (x) => '"' + String(x == null ? '' : x).replace(/"/g, '""') + '"';
+      body = ['at,type,title,path,message,action', ...ev.map((e) => [e.at, e.type, e.title || '', e.path || '', e.message || '', e.action || ''].map(escv).join(','))].join('\r\n');
+    } else body = JSON.stringify(ev, null, 2);
+    await fsp.writeFile(r.filePath, body);
+    return { ok: true, path: r.filePath };
+  });
+
+  H('update:check', async () => {
+    await ensureInit();
+    const res = await updater.checkAndUpdate({ currentVersion: db.version });
+    if (res.updated) {
+      db.load();
+      await settings.set({ autoupdate: { ...settings.get().autoupdate, lastCheck: new Date().toISOString(), lastVersion: res.version } });
+      store.addEvent('update', { message: 'Базы обновлены до ' + res.version });
+      emit({ type: 'db:updated', version: res.version });
+    } else {
+      await settings.set({ autoupdate: { ...settings.get().autoupdate, lastCheck: new Date().toISOString() } });
+    }
+    return res;
+  });
+
+  H('ctx:set', async (on) => {
+    const { execCapture, IS_WIN } = require('./engine/util');
+    if (!IS_WIN) return { ok: false, error: 'доступно только на Windows' };
+    const exe = process.execPath;
+    const cmds = [];
+    if (on) {
+      cmds.push(['reg', ['add', 'HKCU\\Software\\Classes\\*\\shell\\Nukefy', '/ve', '/d', 'Проверить Nukefy', '/f']]);
+      cmds.push(['reg', ['add', 'HKCU\\Software\\Classes\\*\\shell\\Nukefy\\command', '/ve', '/d', '"' + exe + '" --scan "%1"', '/f']]);
+      cmds.push(['reg', ['add', 'HKCU\\Software\\Classes\\Directory\\shell\\Nukefy', '/ve', '/d', 'Проверить Nukefy', '/f']]);
+      cmds.push(['reg', ['add', 'HKCU\\Software\\Classes\\Directory\\shell\\Nukefy\\command', '/ve', '/d', '"' + exe + '" --scan "%1"', '/f']]);
+    } else {
+      cmds.push(['reg', ['delete', 'HKCU\\Software\\Classes\\*\\shell\\Nukefy', '/f']]);
+      cmds.push(['reg', ['delete', 'HKCU\\Software\\Classes\\Directory\\shell\\Nukefy', '/f']]);
+    }
+    for (const [f, a] of cmds) await execCapture(f, a, { timeout: 8000 });
+    await settings.set({ ui: { ...settings.get().ui, ctxMenu: !!on } });
+    return { ok: true };
+  });
 
   H('system:check', async (which) => {
     await ensureInit();
@@ -170,6 +270,14 @@ function registerIpc() {
         const rec = store.add({ ...t, source: 'autorun' });
         out.threats.push(rec);
       }
+    }
+    if (which === 'modules' || (which === 'all' && process.platform === 'win32')) {
+      for (const t of await listTempModuleThreats()) out.threats.push(store.add(t));
+    }
+    if (which === 'boot' || which === 'all') {
+      const boot = await checkBootSectors();
+      out.boot = boot.skipped ? 'пропущено: ' + boot.skipped : (boot.ok ? 'ок' : 'подозрение');
+      for (const t of (boot.threats || [])) out.threats.push(store.add(t));
     }
     if (which === 'hosts' || which === 'all') {
       const hosts = await checkHosts();
@@ -272,6 +380,18 @@ function registerIpc() {
 app.whenReady().then(async () => {
   registerIpc();
   createWindow();
+  createTray();
+  await ensureInit();
+  autoUpdateLoop();
+  // аргумент --scan "<путь>" из контекстного меню проводника
+  const si = process.argv.indexOf('--scan');
+  if (si > -1 && process.argv[si + 1]) {
+    const target = process.argv[si + 1];
+    setTimeout(() => {
+      startScan({ mode: 'custom', roots: [], singleFile: target });
+      if (win) { win.show(); win.webContents.send('nukefy:evt', { type: 'ui:goto', view: 'scan' }); }
+    }, 1200);
+  }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

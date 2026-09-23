@@ -318,3 +318,28 @@ input, select { font: inherit; }
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .empty-note { color: var(--txt-3); font-size: 12.5px; text-align: center; padding: 26px 0; }
+
+/* ---------- шкала опасности: от серого к красному ---------- */
+.sev-bar.sev-1 i.on { background: #8a8a92; }
+.sev-bar.sev-2 i.on { background: #a15757; }
+.sev-bar.sev-3 i.on { background: #c94f4f; }
+.sev-bar.sev-4 i.on { background: #ff5f5f; }
+.list-item[data-sev="2"] { border-left: 3px solid #6d3a3a; }
+.list-item[data-sev="3"] { border-left: 3px solid #93403f; }
+.list-item[data-sev="4"] { border-left: 3px solid #ff5f5f; box-shadow: 0 0 0 1px rgba(255,95,95,.14); }
+.td-title .sev-dot { width: 9px; height: 9px; border-radius: 50%; background: #8a8a92; flex: 0 0 9px; }
+.td-title .sev-dot.s2 { background: #a15757; }
+.td-title .sev-dot.s3 { background: #c94f4f; }
+.td-title .sev-dot.s4 { background: #ff5f5f; box-shadow: 0 0 10px rgba(255,95,95,.6); }
+.sev-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--txt-3); }
+.sev-label.s2 { color: #b06a6a; }
+.sev-label.s3 { color: #d16060; }
+.sev-label.s4 { color: #ff6b6b; }
+.verdict-box.danger { border-color: #6e2b2b; box-shadow: 0 0 0 1px rgba(255,95,95,.12); }
+.verdict-box.danger .verdict-score .val { stroke: #ff5f5f; }
+.verdict-box.suspicious .verdict-score .val { stroke: #c94f4f; }
+.journal-ctl { display: flex; gap: 8px; margin-bottom: 12px; }
+.j-type { flex: 0 0 92px; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--txt-3); padding-top: 2px; }
+.j-type.detect { color: #d16060; }
+.j-type.action { color: var(--txt-2); }
+.j-type.update { color: var(--txt-2); }

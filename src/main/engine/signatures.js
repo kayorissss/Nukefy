@@ -8,8 +8,12 @@ const fs = require('fs');
 const path = require('path');
 
 function dbPath() {
-  // 1) рядом с app.asar / в распакованном каталоге ресурсов
+  // 0) обновлённая база из userData/db (ставится updater-ом)
   const candidates = [];
+  try {
+    const { overrideDir } = require('./updater');
+    candidates.push(path.join(overrideDir(), 'signatures.json'));
+  } catch (_) {}
   try {
     const { app } = require('electron');
     candidates.push(path.join(process.resourcesPath || path.dirname(app.getAppPath()), 'nukefy-db', 'signatures.json'));
@@ -25,6 +29,10 @@ function dbPath() {
 
 function knowledgePath() {
   const candidates = [];
+  try {
+    const { overrideDir } = require('./updater');
+    candidates.push(path.join(overrideDir(), 'knowledge.json'));
+  } catch (_) {}
   try {
     const { app } = require('electron');
     candidates.push(path.join(process.resourcesPath || '', 'nukefy-db', 'knowledge.json'));
@@ -62,6 +70,7 @@ function indexOfPattern(hayLower, needleLower, from = 0) {
 class SignatureDB {
   constructor() {
     this.signatures = [];
+    this.hashIndex = new Map();
     this.pools = { ports: [] };
     this.version = 'unknown';
     this.loadedFrom = null;
@@ -73,6 +82,7 @@ class SignatureDB {
       const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
       this.version = raw.version || 'unknown';
       this.pools = raw.pools || { ports: [] };
+      this.hashIndex = new Map((raw.hashes || []).map((h) => [String(h.sha256).toLowerCase(), h]));
       this.signatures = (raw.signatures || []).map((s) => {
         const compiled = {
           id: s.id, fam: s.fam || 'generic', cat: s.cat || 'risk', sev: s.sev || 2,

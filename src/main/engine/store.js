@@ -16,14 +16,29 @@ class ThreatStore {
     this.deps = deps; // {quarantine, settings, db}
     this.threats = [];
     this.history = []; // завершённые сканирования
+    this.events = [];  // журнал: detect/action/scan/update/system
   }
   async init() {
-    const data = await readJson(this.file, { threats: [], history: [] });
+    const data = await readJson(this.file, { threats: [], history: [], events: [] });
     this.threats = data.threats || [];
     this.history = data.history || [];
+    this.events = data.events || [];
     return this;
   }
-  async save() { try { await writeJson(this.file, { threats: this.threats, history: this.history }); } catch (_) {} }
+  async save() {
+    // очередь записи: исключает гонку параллельных сохранений
+    this._q = (this._q || Promise.resolve()).then(
+      () => writeJson(this.file, { threats: this.threats, history: this.history, events: this.events }).catch(() => {}));
+    return this._q;
+  }
+
+  addEvent(type, payload = {}) {
+    this.events.unshift({ at: nowIso(), type, ...payload });
+    if (this.events.length > 2000) this.events.length = 2000;
+    this.save();
+    return this.events[0];
+  }
+  eventsList() { return this.events.slice(); }
 
   add(threat) {
     const t = { ...threat, id: threat.id || uuid(), foundAt: threat.foundAt || nowIso(), status: threat.status || 'new' };
@@ -104,6 +119,7 @@ class ThreatStore {
     const { removeAutorunEntry, restoreHosts } = require('./persistence');
     const { killProcess } = require('./procscan');
 
+    this.addEvent('action', { action, title: t.title, path: t.path || null, pid: t.pid || null });
     switch (action) {
       case 'heal': {
         if (t.source === 'process' || t.source === 'network') {
@@ -189,6 +205,33 @@ class ThreatStore {
           return r;
         }
         return { ok: false, error: 'Не поддерживается' };
+      }
+      case 'deleteReboot': {
+        if (process.platform !== 'win32') return { ok: false, error: 'доступно только на Windows' };
+        if (!t.path) return { ok: false, error: 'нет пути файла' };
+        const { execCapture } = require('./util');
+        const key = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager';
+        const cur = await execCapture('reg', ['query', key, '/v', 'PendingFileRenameOperations'], { timeout: 8000 });
+        let existing = [];
+        const m = String(cur.stdout || '').match(/REG_MULTI_Z\s+(.+)$/m);
+        if (m) existing = m[1].split('\\0').filter((x) => x && x !== '\\0');
+        const data = existing.concat([ '\\??\\' + t.path, '' ]).join('\\0');
+        const r = await execCapture('reg', ['add', key, '/v', 'PendingFileRenameOperations', '/t', 'REG_MULTI_SZ', '/d', data, '/f'], { timeout: 8000 });
+        if (!r.ok) return { ok: false, error: r.stderr || r.error || 'не удалось запланировать удаление' };
+        this.setStatus(id, 'pending-reboot', { note: 'Файл будет удалён при следующей перезагрузке (до загрузки ОС)' });
+        this.addEvent('action', { action: 'deleteReboot', title: t.title, path: t.path });
+        return { ok: true };
+      }
+      case 'submit': {
+        const settings = this.deps.settings;
+        const key = settings.get().vtKey;
+        if (!key) return { ok: false, error: 'нужен API-ключ VirusTotal в настройках' };
+        if (!t.path) return { ok: false, error: 'нет файла для отправки' };
+        const { vtSubmit } = require('./reputation');
+        const r = await vtSubmit(t.path, key);
+        if (!r.ok) return r;
+        this.addEvent('action', { action: 'submit', title: t.title, path: t.path });
+        return { ok: true, id: r.id };
       }
       case 'whitelist': {
         const s = settings.get();

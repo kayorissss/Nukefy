@@ -11,6 +11,8 @@
 const path = require('path');
 const { walkFiles, readFileCapped, sha256, entropy, isPe, fileStatsSafe } = require('./util');
 const { reputationForFile } = require('./reputation');
+const { parsePE, peHeuristics } = require('./pe');
+const { unzipEntries, isZip, isRar, is7z } = require('./archives');
 const { knowledgeFor } = require('./signatures');
 
 const TEMP_MARKERS = ['\\temp\\', '\\tmp\\', '\\appdata\\local\\temp', '/tmp/', '/var/tmp/', '\\downloads\\', '/downloads/'];
@@ -37,7 +39,11 @@ class FileScanner {
     this.singleFile = opts.singleFile || null;
     this.excludePrefixes = (opts.excludePrefixes || []).map((x) => String(x).toLowerCase());
     this._seenHash = new Set();
+    this.paused = false;
   }
+  pause() { this.paused = true; }
+  resume() { this.paused = false; }
+  static sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
   cancel() { this.cancelled = true; }
 
   async run() {
@@ -71,6 +77,7 @@ class FileScanner {
     for (let w = 0; w < concurrency; w++) {
       workers.push((async () => {
         while (!this.cancelled) {
+          if (this.paused) { await FileScanner.sleep(200); continue; }
           const i = idx++;
           if (i >= total) return;
           const file = files[i];
@@ -111,6 +118,38 @@ class FileScanner {
         title: h.sig.id,
         desc: h.sig.desc,
       });
+    }
+
+    // 1.5) хеш-сигнатуры и PE-статика
+    let sha = null;
+    const execish = ['exe', 'dll', 'scr', 'com', 'sys'].includes(ext) || isPe(buf);
+    if (execish || this.db.hashIndex.size) {
+      if (st.size <= 64 * 1024 * 1024) {
+        try { sha = await sha256(file); } catch (_) {}
+        if (sha && this.db.hashIndex.has(sha)) {
+          const h = this.db.hashIndex.get(sha);
+          findings.push({ kind: 'signature', cat: h.cat, sev: h.sev, fam: h.fam, title: h.id, desc: h.desc || 'Хеш-сигнатура' });
+        }
+      }
+    }
+    if (isPe(buf)) {
+      const pe = parsePE(buf);
+      for (const f of peHeuristics(buf, pe, { path: file, entropyAll: entropy(buf) })) findings.push(f);
+    }
+    // 1.7) архивы: zip рекурсивно
+    if (isZip(buf)) {
+      for (const ent of unzipEntries(buf)) {
+        const eHits = this.db.match(ent.buf, ent.name.split('.').pop().toLowerCase());
+        for (const h of eHits) {
+          findings.push({ kind: 'signature', cat: h.sig.cat, sev: h.sig.sev, fam: h.sig.fam, title: h.sig.id, desc: h.sig.desc + ` (в архиве: ${ent.name})`, inArchive: ent.name });
+        }
+        const epe = parsePE(ent.buf);
+        for (const f of peHeuristics(ent.buf, epe, { path: file + '::' + ent.name, entropyAll: entropy(ent.buf) })) {
+          if (f.sev >= 3) findings.push({ ...f, desc: f.desc + ` (в архиве: ${ent.name})`, inArchive: ent.name });
+        }
+      }
+    } else if (isRar(buf) || is7z(buf)) {
+      findings.push({ kind: 'info', cat: 'risk', sev: 1, fam: 'generic', title: 'Archive.Unsupported', desc: 'Архив RAR/7z не распаковывается движком Nukefy; проверен по хешу и эвристикам контейнера' });
     }
 
     // 2) эвристики
@@ -182,9 +221,9 @@ class FileScanner {
           fam: f.fam,
           title: f.title,
           desc: f.desc,
-          path: file,
+          path: f.inArchive ? file + '::' + f.inArchive : file,
           size: st.size,
-          sha256: f.cloud ? f.cloud.sha256 : undefined,
+          sha256: sha || (f.cloud ? f.cloud.sha256 : undefined),
           foundAt: new Date().toISOString(),
           status: 'new',
           cloud: f.cloud || null,

@@ -48,6 +48,7 @@
       <button class="nav-item" data-view="scan"><span class="nav-ico">◎</span>Сканирование</button>
       <button class="nav-item" data-view="threats"><span class="nav-ico">!</span>Угрозы<span class="nav-badge" id="badgeThreats" hidden>0</span></button>
       <button class="nav-item" data-view="url"><span class="nav-ico">∞</span>Ссылки</button>
+      <button class="nav-item" data-view="journal"><span class="nav-ico">≣</span>Журнал</button>
       <button class="nav-item" data-view="quarantine"><span class="nav-ico">▣</span>Карантин</button>
       <button class="nav-item" data-view="settings"><span class="nav-ico">≡</span>Настройки</button>
       <div class="side-foot">
@@ -104,6 +105,7 @@
             </div>
             <div class="scan-ctl">
               <button class="btn btn-primary btn-lg" id="btnScanStart">Начать проверку</button>
+              <button class="btn btn-lg" id="btnScanPause" disabled>Пауза</button>
               <button class="btn btn-lg" id="btnScanCancel" disabled>Остановить</button>
             </div>
             <div class="scan-stats" id="scanStats"></div>
@@ -142,6 +144,16 @@
         <div class="panel url-history-panel"><div class="panel-head"><h2>История проверок</h2></div><div class="list" id="urlHistory"></div></div>
       </section>
 
+      <!-- ---------- ЖУРНАЛ ---------- -->
+      <section class="view" id="view-journal">
+        <div class="view-head"><h1>Журнал</h1><p class="muted">Обнаружения, действия, сканирования, обновления</p></div>
+        <div class="journal-ctl">
+          <button class="btn" id="btnExpCsv">Экспорт CSV</button>
+          <button class="btn" id="btnExpJson">Экспорт JSON</button>
+        </div>
+        <div class="list" id="journalList"></div>
+      </section>
+
       <!-- ---------- КАРАНТИН ---------- -->
       <section class="view" id="view-quarantine">
         <div class="view-head"><h1>Карантин</h1><p class="muted">Изолированные объекты можно восстановить или удалить навсегда</p></div>
@@ -169,6 +181,20 @@
               <select id="setOnThreat"><option value="notify">Только уведомлять</option><option value="quarantine">Автоматически изолировать файлы</option></select>
             </label>
             <label class="check"><input type="checkbox" id="setAuto"><span>Запускать Nukefy вместе с Windows</span></label>
+            <label class="check"><input type="checkbox" id="setCanary"><span>Ransomware-канарейки в папках документов</span></label>
+            <label class="check"><input type="checkbox" id="setQuiet"><span>Тихий режим (уведомления только о критическом)</span></label>
+            <label class="check"><input type="checkbox" id="setCtx"><span>Контекстное меню проводника «Проверить Nukefy»</span></label>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Расписание и обновление баз</h2></div>
+            <label class="check"><input type="checkbox" id="setSched"><span>Сканирование по расписанию</span></label>
+            <label class="field"><span>Время ежедневной проверки</span><input id="setSchedTime" type="time" value="03:00"></label>
+            <label class="field"><span>Режим проверки по расписанию</span>
+              <select id="setSchedMode"><option value="quick">Быстрая</option><option value="full">Полная</option></select>
+            </label>
+            <label class="check"><input type="checkbox" id="setAutoUpd"><span>Автообновление баз сигнатур (каждые 4 часа)</span></label>
+            <div class="row" style="display:flex;gap:8px"><button class="btn" id="btnUpdNow">Проверить обновления баз</button></div>
+            <small class="muted" id="updNote" style="display:block;margin-top:8px"></small>
           </div>
           <div class="panel">
             <div class="panel-head"><h2>Что проверять</h2></div>

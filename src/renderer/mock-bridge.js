@@ -11,18 +11,28 @@ if (!window.nukefy) {
   const listeners = [];
   const emit = (e) => listeners.forEach((l) => l(e));
   let threats = [];
+  const events = [];
+  const addEvent = (type, payload = {}) => {
+    events.unshift({ at: new Date().toISOString(), type, ...payload });
+    if (events.length > 500) events.length = 500;
+  };
+  addEvent('system', { message: 'Nukefy запущен (демо-режим)' });
+  let paused = false;
   let seq = 0;
   const settings = {
     version: 1, vtKey: '', cloud: { malwarebazaar: true, urlhaus: true, virustotal: 'auto' },
     checks: { processes: true, persistence: true, network: true, startupFiles: true, hashScan: true },
-    scan: {}, protection: { enabled: true, intervalSec: 300 }, actions: { onThreat: 'notify' },
+    scan: {}, protection: { enabled: true, intervalSec: 300, canary: true }, actions: { onThreat: 'notify' },
     whitelist: [], ignored: [], urlHistory: [], autostart: false,
+    ui: { quiet: false, ctxMenu: false }, schedule: { enabled: false, time: '03:00', mode: 'quick' },
+    autoupdate: { enabled: true, intervalH: 4, lastCheck: new Date(Date.now() - 3600e3).toISOString(), lastVersion: '2026.09.22' },
   };
   const state = () => ({
-    version: '1.0.4', platform: 'demo', arch: 'web', dataDir: '(демо-режим браузера)',
-    dbVersion: '2026.09.22', dbSignatures: 22, protection: { enabled: settings.protection.enabled, intervalSec: 300, lastRun: null },
+    version: '1.1.0', platform: 'demo', arch: 'web', dataDir: '(демо-режим браузера)',
+    dbVersion: '2026.09.23', dbSignatures: 22, protection: { enabled: settings.protection.enabled, intervalSec: 300, lastRun: null },
     counts: { active: threats.filter((t) => t.status === 'new').length, quarantined: QUAR.length },
     settings, threats, history: HIST, vtKeySet: !!settings.vtKey,
+    dbLastVersion: settings.autoupdate.lastVersion, dbLastCheck: settings.autoupdate.lastCheck,
   });
   const QUAR = [];
   const HIST = [{ id: 'h1', mode: 'quick', at: new Date(Date.now() - 3600e3).toISOString(), files: 4821, threats: 0, ms: 12400 }];
@@ -42,6 +52,7 @@ if (!window.nukefy) {
         { at: 0.8, t: { source: 'autorun', kind: 'heuristic', cat: 'trojan', sev: 3, fam: 'hidden-autorun', title: 'Autorun.TempTarget', desc: 'Автозапуск файла из временной папки', command: 'C:\\Users\\demo\\AppData\\Local\\Temp\\svc-update\\svchost.exe', key: 'HKCU\\...\\Run', name: 'svc-update' } },
       ];
       for (let i = 0; i <= total; i++) {
+        while (paused) await sleep(200);
         await sleep(mode === 'full' ? 26 : 34);
         emit({ type: 'progress', done: i, total, files: i * 137, threats: threats.length });
         for (const d of demoThreats) {
@@ -49,6 +60,7 @@ if (!window.nukefy) {
             d.done = true;
             const th = { id: 't' + (++seq), status: 'new', foundAt: new Date().toISOString(), scanId: 'demo', ...d.t };
             threats.unshift(th);
+            addEvent('detect', { title: th.title, path: th.path || th.command || null, cat: th.cat, sev: th.sev });
             emit({ type: 'threat', threat: th });
           }
         }
@@ -58,12 +70,21 @@ if (!window.nukefy) {
       return { ok: true, scanId: 'demo' };
     },
     cancelScan: async () => ({ ok: true }),
+    pauseScan: async () => { paused = true; emit({ type: 'scan:paused' }); return { ok: true }; },
+    resumeScan: async () => { paused = false; emit({ type: 'scan:resumed' }); return { ok: true }; },
+    journal: async () => events.slice(),
+    exportJournal: async (fmt) => ({ ok: true, path: 'nukefy-journal.' + (fmt === 'csv' ? 'csv' : 'json') + ' (демо)' }),
+    checkUpdate: async () => { settings.autoupdate.lastCheck = new Date().toISOString(); return { updated: false, already: true }; },
+    setCtxMenu: async (on) => { settings.ui.ctxMenu = !!on; return { ok: true }; },
     systemCheck: async () => ({ ok: true, threats: [] }),
     threats: async () => threats,
     act: async (id, action) => {
       const t = threats.find((x) => x.id === id);
       if (!t) return { ok: false, error: 'нет' };
-      t.status = { heal: 'healed', quarantine: 'quarantined', delete: 'deleted', whitelist: 'whitelisted', ignore: 'ignored', dismiss: 'dismissed' }[action] || 'dismissed';
+      addEvent('action', { action, title: t.title, path: t.path || null });
+      t.status = { heal: 'healed', quarantine: 'quarantined', delete: 'deleted', deleteReboot: 'pending-reboot', submit: 'new', whitelist: 'whitelisted', ignore: 'ignored', dismiss: 'dismissed' }[action] || 'dismissed';
+      if (action === 'submit') return { ok: true, id: 'demo-analysis-id' };
+      if (action === 'deleteReboot') return { ok: true };
       if (action === 'quarantine' && t.path) QUAR.unshift({ id: 'q' + id, name: t.path.split(/[\\/]/).pop(), original: t.path, at: new Date().toISOString(), size: t.size || 1024, cat: t.cat });
       return { ok: true };
     },
@@ -98,14 +119,15 @@ if (!window.nukefy) {
     reveal: async () => ({ ok: true }),
     openPath: async () => ({ ok: true }),
     selftest: async () => {
+      paused = false;
       emit({ type: 'scan:start', scanId: 'st', mode: 'selftest' });
       await sleep(900);
       const th = { id: 't' + (++seq), status: 'new', foundAt: new Date().toISOString(), source: 'file', kind: 'signature', cat: 'virus', sev: 1, fam: 'eicar', title: 'Win32.EICAR-Test', desc: 'Тест EICAR', path: '(демо) eicar-com-test.txt', size: 68 };
-      threats.unshift(th); emit({ type: 'threat', threat: th });
+      threats.unshift(th); addEvent('detect', { title: th.title, path: th.path, cat: th.cat, sev: th.sev }); emit({ type: 'threat', threat: th });
       emit({ type: 'scan:finished', scanId: 'st', stats: { files: 2, threats: 2, ms: 900 }, cancelled: false, selftest: true });
       return { ok: true, files: 2, threats: 2, expect: 2, pass: true };
     },
-    setProtection: async (on) => { settings.protection.enabled = on; return { ok: true }; },
+    setProtection: async (on) => { settings.protection.enabled = on; addEvent('system', { message: on ? 'Резидентная защита включена' : 'Резидентная защита выключена' }); return { ok: true }; },
     setAutostart: async (on) => { settings.autostart = on; return { ok: true }; },
     quit: async () => { document.body.innerHTML = '<div style="color:#888;display:flex;height:100vh;align-items:center;justify-content:center;font-family:sans-serif">Демо-сессия завершена</div>'; return { ok: true }; },
     minimize: async () => ({ ok: true }),

@@ -189,12 +189,13 @@ function safeNameFromPath(p) {
 }
 
 /** Атомарная запись JSON. */
+let _tmpSeq = 0;
 async function writeJson(file, obj) {
   await fsp.mkdir(path.dirname(file), { recursive: true });
-  const tmp = file + '.tmp';
+  const tmp = `${file}.${process.pid}.${++_tmpSeq}.tmp`;
   await fsp.writeFile(tmp, JSON.stringify(obj, null, 2));
   try { await fsp.rename(tmp, file); } catch (_) {
-    try { await fsp.rm(file, { force: true }); await fsp.rename(tmp, file); } catch (e) { throw e; }
+    try { await fsp.rm(file, { force: true }); await fsp.rename(tmp, file); } catch (e) { await fsp.rm(tmp, { force: true }); throw e; }
   }
 }
 

@@ -22,7 +22,8 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.classList.remove('show'); setTimeout(() => { t.hidden = true; }, 400); }, 3600);
 }
-function sevBar(sev) { return `<span class="sev-bar">${[1, 2, 3, 4].map((i) => `<i class="${i <= sev ? 'on' : ''}"></i>`).join('')}</span>`; }
+const SEV_TEXT = { 1: 'низкая', 2: 'средняя', 3: 'высокая', 4: 'критическая' };
+function sevBar(sev) { return `<span class="sev-bar sev-${sev || 1}">${[1, 2, 3, 4].map((i) => `<i class="${i <= sev ? 'on' : ''}"></i>`).join('')}</span>`; }
 
 /* ---------------- загрузочная анимация ---------------- */
 const BOOT_STEPS = [
@@ -45,6 +46,9 @@ function normalizeState() {
   STATE.settings.actions = STATE.settings.actions || {};
   STATE.settings.checks = STATE.settings.checks || {};
   STATE.settings.urlHistory = STATE.settings.urlHistory || [];
+  STATE.settings.ui = STATE.settings.ui || {};
+  STATE.settings.schedule = STATE.settings.schedule || {};
+  STATE.settings.autoupdate = STATE.settings.autoupdate || {};
   return STATE;
 }
 async function boot() {
@@ -75,6 +79,7 @@ function initApp() {
   bindThreats();
   bindUrl();
   bindQuarantine();
+  bindJournal();
   bindSettings();
   bindEvents();
   refreshAll();
@@ -90,7 +95,27 @@ function bindNav() {
     if (v === 'threats') renderThreats();
     if (v === 'quarantine') renderQuarantine();
     if (v === 'url') renderUrlHistory();
+    if (v === 'journal') renderJournal();
   }));
+}
+async function renderJournal() {
+  const wrap = $('#journalList');
+  if (!wrap) return;
+  const ev = (await api.journal()) || [];
+  if (!ev.length) { wrap.innerHTML = '<div class="empty-note">Журнал пуст</div>'; return; }
+  const TYPE_LABEL = { detect: 'Обнаружение', action: 'Действие', scan: 'Сканирование', update: 'Обновление', system: 'Система' };
+  wrap.innerHTML = ev.slice(0, 300).map((e) => `
+    <div class="list-item" style="cursor:default">
+      <div class="j-type ${esc(e.type)}">${TYPE_LABEL[e.type] || esc(e.type)}</div>
+      <div class="li-body">
+        <div class="li-title">${esc(e.title || e.message || TYPE_LABEL[e.type] || e.type)}</div>
+        <div class="li-sub">${e.path ? esc(e.path) : ''}${e.action ? ' · действие: ' + esc(e.action) : ''} · ${fmtDate(e.at)}</div>
+      </div>
+    </div>`).join('');
+}
+function bindJournal() {
+  const c = $('#btnExpCsv'); if (c) c.onclick = async () => { const r = await api.exportJournal('csv'); if (r && r.ok) toast('Журнал сохранён: ' + r.path); };
+  const j = $('#btnExpJson'); if (j) j.onclick = async () => { const r = await api.exportJournal('json'); if (r && r.ok) toast('Журнал сохранён: ' + r.path); };
 }
 function bindTitlebar() {
   $('#btnMin').onclick = () => api.minimize();
@@ -125,7 +150,7 @@ function refreshDashboard() {
   const ok = act.length === 0;
   $('#shieldVerdict').textContent = ok ? 'Защищено' : `Обнаружено угроз: ${act.length}`;
   $('#shieldNote').textContent = ok
-    ? `База сигнатур ${STATE ? STATE.dbVersion : ''} · последняя проверка: ${hist[0] ? fmtDate(hist[0].at) : 'ещё не проводилась'}`
+    ? `База сигнатур ${STATE ? STATE.dbVersion : ''} · последняя проверка: ${hist[0] ? fmtDate(hist[0].at) : 'ещё не проводилась'}${STATE && STATE.dbLastCheck ? ' · базы обновлены ' + fmtDate(STATE.dbLastCheck) : ''}`
     : 'Откройте вкладку «Угрозы», чтобы вылечить или изолировать объекты';
   $('#tbStatus').textContent = ok ? 'Система защищена' : `Внимание: активных угроз — ${act.length}`;
   $('#tbStatus').classList.toggle('alert', !ok);
@@ -159,11 +184,14 @@ function bindScan() {
       roots = r.paths;
     }
     scanUi.active = true;
+    scanUi.paused = false;
     scanUi.results = [];
     renderScanResults();
     $('#radar').classList.add('scanning');
     $('#btnScanStart').disabled = true;
     $('#btnScanCancel').disabled = false;
+    $('#btnScanPause').disabled = false;
+    $('#btnScanPause').textContent = 'Пауза';
     $('#scanPct').textContent = '0%';
     $('#scanPhase').textContent = 'Подготовка…';
     $('#scanPath').textContent = '';
@@ -171,6 +199,10 @@ function bindScan() {
     await api.startScan({ mode: scanUi.mode, roots });
   };
   $('#btnScanCancel').onclick = async () => { await api.cancelScan(); };
+  $('#btnScanPause').onclick = async () => {
+    if (scanUi.paused) { scanUi.paused = false; $('#btnScanPause').textContent = 'Пауза'; await api.resumeScan(); }
+    else { scanUi.paused = true; $('#btnScanPause').textContent = 'Продолжить'; await api.pauseScan(); }
+  };
   $$('#scanTabs .tab').forEach((t) => t.addEventListener('click', () => {
     $$('#scanTabs .tab').forEach((x) => x.classList.remove('active'));
     t.classList.add('active');
@@ -197,8 +229,15 @@ function bindScan() {
     toast(r.pass ? `Самопроверка пройдена: детектов ${r.threats} из ${r.expect} ожидаемых` : `Самопроверка НЕ пройдена: ${r.threats}/${r.expect}`);
   };
 }
+const CAT_LABELS = { all: 'Все', virus: 'Вирусы', miner: 'Майнеры', trojan: 'Трояны', risk: 'Риски' };
 function renderScanResults() {
   const box = $('#scanResults');
+  const counts = { all: scanUi.results.length };
+  for (const r of scanUi.results) counts[r.cat] = (counts[r.cat] || 0) + 1;
+  $$('#scanTabs .tab').forEach((b) => {
+    const c = b.dataset.cat;
+    b.textContent = (CAT_LABELS[c] || c) + (counts[c] ? ' · ' + counts[c] : '');
+  });
   const rows = scanUi.results.filter((t) => scanUi.cat === 'all' || t.cat === scanUi.cat);
   box.innerHTML = rows.length ? rows.map((t) => listItem(t, false)).join('') : `<div class="empty-note">${scanUi.active ? 'Проверка идёт — находки появятся здесь' : 'Находок нет'}</div>`;
   $$('#scanResults .list-item').forEach((el) => el.onclick = () => {
@@ -209,9 +248,9 @@ function renderScanResults() {
 
 /* ---------------- список угроз ---------------- */
 function listItem(t, compact) {
-  return `<div class="list-item" data-id="${esc(t.id)}">
+  return `<div class="list-item" data-id="${esc(t.id)}" data-sev="${t.sev || 1}">
     <div class="li-body">
-      <div class="li-title">${esc(t.title)} ${helpQ(t)}
+      <div class="li-title"><span class="sev-dot s${t.sev || 1}"></span>${esc(t.title)} ${helpQ(t)}
         <span class="cat-chip ${esc(t.cat)}">${CATS[t.cat] || t.cat}</span>${sevBar(t.sev)}</div>
       <div class="li-sub">${esc(SRC[t.source] || t.source)} · ${esc(t.path || t.url || (t.pid ? 'PID ' + t.pid : t.host || ''))} · ${fmtDate(t.foundAt)}${t.status !== 'new' ? ' · ' + statusRu(t.status) : ''}</div>
     </div>
@@ -282,7 +321,7 @@ function bindThreats() {
     const r = await api.act(id, action);
     if (!r.ok) toast('Не удалось: ' + (r.error || 'неизвестная ошибка'));
     else {
-      toast({ heal: 'Лечение выполнено', quarantine: 'Объект помещён в карантин', delete: 'Удалено безвозвратно', whitelist: 'Добавлено в исключения', ignore: 'Угроза будет игнорироваться', dismiss: 'Помечено обработанным' }[action] || 'Готово');
+      toast({ heal: 'Лечение выполнено', quarantine: 'Объект помещён в карантин', delete: 'Удалено безвозвратно', deleteReboot: 'Файл будет удалён при следующей перезагрузке', submit: 'Образец отправлен в VirusTotal', whitelist: 'Добавлено в исключения', ignore: 'Угроза будет игнорироваться', dismiss: 'Помечено обработанным' }[action] || 'Готово');
       if (r.follow === 'quarantine-suggested') toast('Рекомендуем также изолировать связанный файл');
     }
     await refreshAll();
@@ -310,7 +349,7 @@ async function selectThreat(id) {
   if (!t) { box.innerHTML = '<div class="td-empty">Выберите угрозу слева</div>'; return; }
   const k = await loadKnowledge(t);
   box.innerHTML = `
-    <div class="td-title">${esc(t.title)} <span class="cat-chip ${esc(t.cat)}">${CATS[t.cat] || t.cat}</span>${sevBar(t.sev)}</div>
+    <div class="td-title">${esc(t.title)} <span class="cat-chip ${esc(t.cat)}">${CATS[t.cat] || t.cat}</span>${sevBar(t.sev)} <span class="sev-label s${t.sev}">${SEV_TEXT[t.sev] || ''}</span></div>
     <div class="td-row"><div class="k">Источник</div><div class="v">${esc(SRC[t.source] || t.source)}${t.pid ? ' · PID ' + t.pid : ''}</div></div>
     ${t.path ? `<div class="td-row"><div class="k">Объект</div><div class="v">${esc(t.path)}</div></div>` : ''}
     ${t.url ? `<div class="td-row"><div class="k">Адрес</div><div class="v">${esc(t.url)}</div></div>` : ''}
@@ -331,6 +370,8 @@ async function selectThreat(id) {
       <button class="btn btn-primary" data-act="heal" data-id="${esc(t.id)}">Вылечить</button>
       <button class="btn" data-act="quarantine" data-id="${esc(t.id)}">В карантин</button>
       <button class="btn btn-danger" data-act="delete" data-id="${esc(t.id)}">Удалить</button>
+      ${t.source === 'file' && t.status !== 'quarantined' ? `<button class="btn" data-act="deleteReboot" data-id="${esc(t.id)}">Удалить при перезагрузке</button>` : ''}
+      ${t.source === 'file' && t.path ? `<button class="btn" data-act="submit" data-id="${esc(t.id)}">Отправить в VirusTotal</button>` : ''}
       <button class="btn" data-act="whitelist" data-id="${esc(t.id)}">В исключения</button>
       <button class="btn" data-act="ignore" data-id="${esc(t.id)}">Игнорировать</button>
       ${t.path ? `<button class="btn" data-act="reveal" data-id="${esc(t.id)}">Открыть папку</button>` : ''}
@@ -445,6 +486,30 @@ function bindSettings() {
   $('#chkPers').onchange = (e) => save({ checks: { ...STATE.settings.checks, persistence: e.target.checked } });
   $('#chkNet').onchange = (e) => save({ checks: { ...STATE.settings.checks, network: e.target.checked } });
   $('#chkHash').onchange = (e) => save({ checks: { ...STATE.settings.checks, hashScan: e.target.checked } });
+  const sch = () => (STATE.settings.schedule = STATE.settings.schedule || {});
+  const uiS = () => (STATE.settings.ui = STATE.settings.ui || {});
+  const auS = () => (STATE.settings.autoupdate = STATE.settings.autoupdate || {});
+  $('#setCanary').onchange = (e) => save({ protection: { ...STATE.settings.protection, canary: e.target.checked } });
+  $('#setQuiet').onchange = (e) => save({ ui: { ...uiS(), quiet: e.target.checked } });
+  $('#setCtx').onchange = async (e) => {
+    const r = await api.setCtxMenu(e.target.checked);
+    if (r && r.error) { toast(r.error); e.target.checked = !e.target.checked; }
+    else { await save({ ui: { ...uiS(), ctxMenu: e.target.checked } }); toast(e.target.checked ? 'Контекстное меню проводника добавлено' : 'Контекстное меню удалено'); }
+  };
+  $('#setSched').onchange = (e) => save({ schedule: { ...sch(), enabled: e.target.checked } });
+  $('#setSchedTime').onchange = (e) => save({ schedule: { ...sch(), time: e.target.value } });
+  $('#setSchedMode').onchange = (e) => save({ schedule: { ...sch(), mode: e.target.value } });
+  $('#setAutoUpd').onchange = (e) => save({ autoupdate: { ...auS(), enabled: e.target.checked } });
+  $('#btnUpdNow').onclick = async () => {
+    $('#btnUpdNow').disabled = true;
+    toast('Проверяю обновления баз…');
+    const r = await api.checkUpdate();
+    $('#btnUpdNow').disabled = false;
+    if (r && r.updated) toast('Базы обновлены до версии ' + r.version);
+    else if (r && r.error) toast('Обновление не удалось: ' + r.error);
+    else toast('Базы актуальны');
+    STATE = await api.state(); fillSettings(); refreshDashboard();
+  };
 }
 function fillSettings() {
   if (!STATE) return;
@@ -460,6 +525,15 @@ function fillSettings() {
   $('#chkPers').checked = s.checks.persistence !== false;
   $('#chkNet').checked = s.checks.network !== false;
   $('#chkHash').checked = s.checks.hashScan !== false;
+  const sch = s.schedule || {}, ui = s.ui || {}, au = s.autoupdate || {};
+  $('#setCanary').checked = (s.protection || {}).canary !== false;
+  $('#setQuiet').checked = !!ui.quiet;
+  $('#setCtx').checked = !!ui.ctxMenu;
+  $('#setSched').checked = !!sch.enabled;
+  $('#setSchedTime').value = sch.time || '03:00';
+  $('#setSchedMode').value = sch.mode || 'quick';
+  $('#setAutoUpd').checked = au.enabled !== false;
+  $('#updNote').textContent = au.lastCheck ? 'Последняя проверка: ' + fmtDate(au.lastCheck) + (au.lastVersion ? ' · версия баз ' + au.lastVersion : '') : 'Обновления ещё не проверялись';
   $('#aboutBox').innerHTML = `<b>Nukefy ${esc(STATE.version)}</b> · сборка ${esc(STATE.platform)}/${esc(STATE.arch)}<br>
   База сигнатур: <b>${esc(STATE.dbVersion)}</b>, правил: <b>${STATE.dbSignatures}</b><br>
   Облако: MalwareBazaar и URLhaus (abuse.ch) — бесплатно без ключа; VirusTotal — по вашему бесплатному ключу.<br>
@@ -491,6 +565,7 @@ function bindEvents() {
       scanUi.last = null;
       $('#radar').classList.add('scanning');
       $('#btnScanStart').disabled = true; $('#btnScanCancel').disabled = false;
+      $('#btnScanPause').disabled = false; $('#btnScanPause').textContent = 'Пауза';
       scanTicker();
     }
     if (e.type === 'phase') {
@@ -516,14 +591,20 @@ function bindEvents() {
       if (scanUi.tick) { clearInterval(scanUi.tick); scanUi.tick = null; }
       $('#radar').classList.remove('scanning');
       $('#btnScanStart').disabled = false; $('#btnScanCancel').disabled = true;
+      $('#btnScanPause').disabled = true; $('#btnScanPause').textContent = 'Пауза';
       $('#scanPct').textContent = '100%';
       $('#scanPhase').textContent = e.cancelled ? 'Остановлено' : 'Проверка завершена';
       $('#scanStats').textContent = `файлов: ${(e.stats.files || 0).toLocaleString('ru-RU')} · угроз: ${e.stats.threats || 0} · ${(e.stats.ms / 1000).toFixed(1)} с`;
       if (!e.selftest) toast(e.cancelled ? 'Проверка остановлена' : `Проверка завершена: угроз — ${e.stats.threats}`);
       await refreshAll();
     }
+    if (e.type === 'scan:paused') { scanUi.paused = true; $('#scanPhase').textContent = 'Пауза'; }
+    if (e.type === 'scan:resumed') { scanUi.paused = false; $('#scanPhase').textContent = 'Сканирование…'; }
+    if (e.type === 'ui:goto') { const n = document.querySelector(`[data-view="${e.view || 'threats'}"]`); if (n) n.click(); }
+    if (e.type === 'db:updated') { STATE.dbVersion = e.version; refreshDashboard(); toast('Базы сигнатур обновлены до ' + e.version); }
     if (e.type === 'protection:alert') {
-      toast(`Резидентная защита: ${e.threat.title}${e.auto ? ' — файл изолирован автоматически' : ''}`);
+      const quiet = STATE && STATE.settings && STATE.settings.ui && STATE.settings.ui.quiet;
+      if (!quiet || e.threat.sev >= 4) toast(`Резидентная защита: ${e.threat.title}${e.auto ? ' — файл изолирован автоматически' : ''}`);
       await refreshAll();
     }
     if (e.type === 'threats:changed') await refreshAll();
