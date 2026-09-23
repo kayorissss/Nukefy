@@ -25,6 +25,38 @@ async function t(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n      ' + (e && e.stack || e).split('\n').slice(0, 4).join('\n      ')); }
 }
 
+/* ---- хелперы v1.1.0 ---- */
+const { parsePE, peHeuristics } = require('../src/main/engine/pe');
+const { unzipEntries } = require('../src/main/engine/archives');
+const zlib = require('zlib');
+const EICAR_STR = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
+function fakePe(over = {}) {
+  return { ok: true, is64: false, timestamp: 0, checksum: 0, sections: [], imports: [], overlay: { size: 0, entropy: 0 }, hasCert: false, ddCount: 0, ...over };
+}
+function makeZip(entries) {
+  const locals = []; const centrals = []; let offset = 0;
+  for (const [name, content] of entries) {
+    const nb = Buffer.from(name); const data = Buffer.from(content);
+    const comp = zlib.deflateRawSync(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8);
+    lh.writeUInt32LE(comp.length, 18); lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(nb.length, 26);
+    locals.push(lh, nb, comp);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(8, 10);
+    ch.writeUInt32LE(comp.length, 20); ch.writeUInt32LE(data.length, 24); ch.writeUInt16LE(nb.length, 28);
+    ch.writeUInt32LE(offset, 42);
+    centrals.push(ch, nb);
+    offset += 30 + nb.length + comp.length;
+  }
+  const cbuf = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cbuf.length, 12); eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, cbuf, eocd]);
+}
+
 (async () => {
   await fsp.mkdir(FIX, { recursive: true });
   const db = new SignatureDB();
@@ -211,6 +243,92 @@ async function t(name, fn) {
     const th = analyzeAutorun(items, db);
     assert.ok(!th.some((x) => /Zapret/i.test(x.command || '')), 'zapret не помечен');
     assert.ok(th.some((x) => x.reason === 'masquerade'), 'чужой Temp помечен');
+  });
+
+  await t('PE-парсер: синтетический PE читается, мусор отклоняется', async () => {
+    assert.equal(parsePE(Buffer.from('just some data')).ok, false);
+    const buf = Buffer.alloc(1024);
+    buf.write('MZ'); buf.writeUInt32LE(0x80, 0x3c);
+    buf.writeUInt32LE(0x4550, 0x80);
+    buf.writeUInt16LE(1, 0x86);
+    buf.writeUInt32LE(0x60000000, 0x88);
+    buf.writeUInt16LE(0xe0, 0x94);
+    buf.writeUInt16LE(0x10b, 0x98);
+    buf.writeUInt32LE(16, 0x98 + 92);
+    const secOff = 0x80 + 24 + 0xe0;
+    buf.write('.text', secOff, 'latin1');
+    buf.writeUInt32LE(0x200, secOff + 8);
+    buf.writeUInt32LE(0x1000, secOff + 12);
+    buf.writeUInt32LE(0x200, secOff + 16);
+    buf.writeUInt32LE(0x400, secOff + 20);
+    buf.writeUInt32LE(0x60000020, secOff + 36);
+    const pe = parsePE(buf);
+    assert.equal(pe.ok, true);
+    assert.equal(pe.sections.length, 1);
+    assert.equal(pe.sections[0].name, '.text');
+  });
+
+  await t('PE: упаковщик и W+X → риск (не выше sev3)', async () => {
+    const pe = fakePe({ sections: [{ name: 'UPX0', chars: 0xe0000060, rawSize: 100, entropy: 7.9 }], timestamp: 0x60000000 });
+    const h = peHeuristics(Buffer.alloc(10), pe, { path: 'C:\\App\\app.exe', entropyAll: 6.9 });
+    assert.ok(h.some((x) => x.title === 'Heur.PE.Packer'), 'упаковщик найден');
+    assert.ok(h.every((x) => x.sev <= 3), 'не завышена опасность');
+  });
+
+  await t('PE: инъекция API — только с доп. признаком (анти-ФП)', async () => {
+    const imports = [{ dll: 'kernel32.dll', funcs: ['VirtualAllocEx', 'WriteProcessMemory', 'CreateRemoteThread'] }];
+    const clean = fakePe({ imports, timestamp: 0x60000000 });
+    const legit = peHeuristics(Buffer.alloc(10), clean, { path: 'C:\\Program Files\\App\\app.exe', entropyAll: 5.1 });
+    assert.equal(legit.some((x) => x.title === 'Heur.PE.Injection'), false, 'обычная программа не помечается');
+    const tmp = peHeuristics(Buffer.alloc(10), clean, { path: 'C:\\Users\\u\\AppData\\Local\\Temp\\x.exe', entropyAll: 5.1 });
+    assert.ok(tmp.some((x) => x.title === 'Heur.PE.Injection'), 'в Temp — помечается');
+  });
+
+  await t('ZIP: EICAR внутри архива находится сканером', async () => {
+    const zip = makeZip([['readme.txt', 'hello'], ['virus.com', EICAR_STR]]);
+    const ents = unzipEntries(zip);
+    assert.equal(ents.length, 2);
+    assert.equal(ents.find((e) => e.name === 'readme.txt').buf.toString(), 'hello');
+    const zp = path.join(FIX, 'pack.zip');
+    await fsp.writeFile(zp, zip);
+    const settings = new Settings(); await settings.load();
+    settings.data.cloud = { malwarebazaar: false, urlhaus: false, virustotal: 'off' };
+    const found = [];
+    const sc = new FileScanner({ db, settings: settings.data, scanId: 'z1', mode: 'custom', roots: [], singleFile: zp, cloud: false, onEvent: (e) => { if (e.type === 'threat') found.push(e.threat); } });
+    await sc.run();
+    assert.ok(found.some((f) => /EICAR/i.test(f.title)), 'EICAR в архиве найден');
+    assert.ok(found.some((f) => String(f.path).includes('::')), 'путь указывает на запись архива');
+  });
+
+  await t('загрузочные секторы: нормальный MBR — тихо, зашифрованный — тревога', async () => {
+    const { parseBootSectors } = require('../src/main/engine/persistence');
+    const good = Buffer.alloc(1024, 0);
+    good.write('NTFS    ', 3, 'latin1');
+    good[510] = 0x55; good[511] = 0xaa;
+    good.write('EFI PART', 512, 'latin1');
+    const g = parseBootSectors(good);
+    assert.equal(g.known, true); assert.equal(g.gpt, true); assert.equal(g.mbrSig, true);
+    const evil = Buffer.concat([crypto.randomBytes(510), Buffer.from([0x55, 0xaa]), Buffer.alloc(512, 0)]);
+    const e = parseBootSectors(evil);
+    assert.equal(e.mbrSig, true); assert.equal(e.known, false);
+    assert.ok(e.bootEntropy > 7.4, 'энтропия загрузочного кода высокая');
+  });
+
+  await t('журнал событий: запись, чтение, переживание перезапуска', async () => {
+    const dir = await fsp.mkdtemp(path.join(FIX, 'st-'));
+    const st = await new ThreatStore(path.join(dir, 't.json'), { settings: { get: () => ({}) } }).init();
+    st.addEvent('detect', { title: 'X' });
+    st.addEvent('action', { action: 'heal', title: 'X' });
+    assert.equal(st.eventsList().length, 2);
+    assert.equal(st.eventsList()[0].action, 'heal');
+    await new Promise((r) => setTimeout(r, 150));
+    const st2 = await new ThreatStore(path.join(dir, 't.json'), { settings: { get: () => ({}) } }).init();
+    assert.equal(st2.eventsList().length, 2, 'журнал сохранён на диске');
+  });
+
+  await t('хеш-сигнатуры: EICAR по SHA-256 в индексе', async () => {
+    assert.ok(db.hashIndex.size >= 1, 'индекс хешей загружен');
+    assert.ok(db.hashIndex.has('275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f'));
   });
 
   await t('levenshtein', async () => {

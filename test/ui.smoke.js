@@ -70,6 +70,24 @@ async function until(fn, ms, label) {
   await until(() => /quarantined|в карантине/i.test(doc.getElementById('threatDetail').textContent), 4000, 'действие карантин');
   console.log('  ok  действие «В карантин» применяется');
 
+  // журнал событий
+  doc.querySelector('[data-view="journal"]').click();
+  await until(() => doc.getElementById('view-journal').classList.contains('active'), 2000, 'вкладка журнала');
+  await until(() => doc.querySelectorAll('#journalList .list-item').length >= 1, 4000, 'события в журнале');
+  console.log('  ok  журнал событий: ' + doc.querySelectorAll('#journalList .list-item').length + ' записей');
+
+  // пауза и счётчики вкладок на экране сканирования
+  doc.querySelector('[data-view="scan"]').click();
+  await until(() => doc.getElementById('btnScanPause') !== null, 2000, 'кнопка паузы');
+  const allTab = doc.querySelector('#scanTabs [data-cat="all"]');
+  if (!/·\s*\d+/.test(allTab.textContent)) throw new Error('во вкладке «Все» нет счётчика находок: ' + allTab.textContent);
+  console.log('  ok  счётчики во вкладках сканирования: ' + allTab.textContent.trim());
+
+  // опасные находки подсвечены красной шкалой
+  const sevItem = doc.querySelector('#scanResults .list-item[data-sev]');
+  if (!sevItem) throw new Error('у находок нет атрибута опасности');
+  console.log('  ok  находки размечены уровнем опасности (data-sev=' + sevItem.getAttribute('data-sev') + ')');
+
   // анализ ссылки
   doc.querySelector('[data-view="url"]').click();
   doc.getElementById('urlInput').value = 'http://192.168.0.7/login';

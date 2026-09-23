@@ -168,6 +168,26 @@ function analyzeProcesses(procs, conns, db, opts = {}) {
   return threats;
 }
 
+/** Модули (DLL), загруженные процессами из временных папок — признак side-load/инъекции. */
+async function listTempModuleThreats() {
+  if (!IS_WIN) return [];
+  const cmd = "Get-CimInstance Win32_Process | ForEach-Object { $pr = $_; try { (Get-Process -Id $pr.ProcessId -ErrorAction Stop).Modules | Where-Object { $_.FileName -match '\\\\(Temp|Tmp)\\\\' } | ForEach-Object { [pscustomobject]@{ Pid = $pr.ProcessId; Name = $pr.Name; Exe = $pr.ExecutablePath; Dll = $_.FileName } } } catch {} } | ConvertTo-Json -Compress";
+  const r = await execCapture('powershell', ['-NoProfile', '-NonInteractive', '-Command', cmd], { timeout: 30000 });
+  if (!r.stdout) return [];
+  let arr = null;
+  try { arr = JSON.parse(r.stdout.replace(/^\uFEFF/, '')); } catch (_) { return []; }
+  const out = [];
+  for (const m of Array.isArray(arr) ? arr : [arr]) {
+    if (!m || !m.Dll) continue;
+    out.push({
+      source: 'process', pid: m.Pid, name: m.Name, path: m.Dll, cmd: m.Exe || '',
+      fam: 'dll-sideload', cat: 'trojan', sev: 3, title: 'Proc.TempDLL',
+      desc: `Процесс ${m.Name} загрузил библиотеку из временной папки: ${m.Dll}`, reason: 'temp-dll',
+    });
+  }
+  return out;
+}
+
 async function killProcess(pid) {
   if (IS_WIN) {
     const r = await execCapture('taskkill', ['/pid', String(pid), '/f', '/t'], { timeout: 8000 });
@@ -176,4 +196,4 @@ async function killProcess(pid) {
   try { process.kill(pid, 'SIGKILL'); return { ok: true }; } catch (e) { return { ok: false, error: String(e && e.message) }; }
 }
 
-module.exports = { listProcesses, listConnections, analyzeProcesses, killProcess, SYSTEM_NAMES, masquerade };
+module.exports = { listProcesses, listConnections, analyzeProcesses, killProcess, listTempModuleThreats, SYSTEM_NAMES, masquerade };

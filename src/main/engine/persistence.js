@@ -193,6 +193,44 @@ async function checkHosts() {
   return { ok: issues.length === 0, issues, path: p };
 }
 
+/** Разбор дампа начала диска: MBR/VBR/GPT. Чистая функция для тестов. */
+function parseBootSectors(buf) {
+  if (!buf || buf.length < 1024) return { ok: false };
+  const mbrSig = buf[510] === 0x55 && buf[511] === 0xaa;
+  const gpt = buf.slice(512, 520).toString('latin1') === 'EFI PART';
+  const boot = buf.slice(0, 440);
+  const text = buf.slice(0, 512).toString('latin1');
+  const known = /MSWIN|NTFS|BOOTMGR|GRUB|SYSLINUX|EXFAT|FAT12|FAT16|FAT32|MSDOS|EFI|GPT|Recovery|Microsoft/i.test(text);
+  const bootEntropy = require('./util').entropy(boot);
+  return { ok: true, mbrSig, gpt, known, bootEntropy };
+}
+
+/** Проверка загрузочных секторов физического диска (Windows, нужны права администратора). */
+async function checkBootSectors() {
+  if (!IS_WIN) return { ok: true, skipped: 'не Windows' };
+  const fsx = require('fs');
+  for (let i = 0; i < 2; i++) {
+    const dev = '\\\\.\\PhysicalDrive' + i;
+    let fd = null;
+    try {
+      fd = fsx.openSync(dev, 'r');
+      const buf = Buffer.alloc(1024);
+      fsx.readSync(fd, buf, 0, 1024, 0);
+      const p = parseBootSectors(buf);
+      if (!p.ok) continue;
+      if (p.mbrSig && !p.gpt && !p.known && p.bootEntropy > 7.4) {
+        return { ok: false, threats: [{ source: 'boot', cat: 'virus', sev: 4, fam: 'bootkit', title: 'Bootkit.MBR', desc: `Загрузочный код ${dev}: энтропия ${p.bootEntropy.toFixed(2)}, без признаков стандартного загрузчика — возможен буткит`, path: dev }] };
+      }
+      return { ok: true, device: dev, mbrSig: p.mbrSig, gpt: p.gpt };
+    } catch (e) {
+      return { ok: true, skipped: 'нет прав администратора на чтение диска' };
+    } finally {
+      if (fd != null) { try { fsx.closeSync(fd); } catch (_) {} }
+    }
+  }
+  return { ok: true };
+}
+
 async function restoreHosts(backupDir) {
   const p = hostsPath();
   try {
@@ -226,4 +264,4 @@ async function removeAutorunEntry(item) {
   } catch (e) { return { ok: false, error: String(e && e.message) }; }
 }
 
-module.exports = { collectAutorun, analyzeAutorun, checkHosts, analyzeHostsText, restoreHosts, removeAutorunEntry, startupFolders, hostsPath, RUN_KEYS };
+module.exports = { collectAutorun, analyzeAutorun, checkHosts, analyzeHostsText, checkBootSectors, parseBootSectors, restoreHosts, removeAutorunEntry, startupFolders, hostsPath, RUN_KEYS };

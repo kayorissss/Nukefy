@@ -61,7 +61,10 @@ const DEFAULTS = () => ({
   version: 1,
   vtKey: '',
   cloud: { malwarebazaar: true, urlhaus: true, virustotal: 'auto' }, // auto: только при ключе
-  checks: { processes: true, persistence: true, network: true, startupFiles: true, hashScan: true },
+  checks: { processes: true, persistence: true, network: true, startupFiles: true, hashScan: true, modules: true, boot: true },
+  schedule: { enabled: false, time: '03:00', mode: 'quick' },
+  ui: { quiet: false },
+  autoupdate: { enabled: true, intervalH: 4, lastCheck: null, lastVersion: null },
   scan: {
     fullRoots: defaultScanRoots(),
     quickRoots: quickScanRoots(),
